@@ -22,7 +22,7 @@ import tensorflow as tf
 import sklearn.cluster as cluster
 from sklearn.metrics.pairwise import euclidean_distances
 import os
-from preprocessing import load_images_from_files, get_activations_of_images, get_gradients_of_images
+from ACE_helper import load_images_from_files, get_activations_of_images, get_gradients_of_images
 from tcav import cav
 import scipy.stats as stats
 
