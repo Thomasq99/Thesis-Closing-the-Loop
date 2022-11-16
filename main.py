@@ -6,14 +6,15 @@ import os
 import shutil
 
 # START Variables
-TRAIN = True
+TRAIN = False
 data_prepared = True
-model_path = './3dshapes_model'
-working_dir = 'ACE_out_sphere_3dshapes'
+model_path = './models/3dshapes_model'
 class_to_id = {'cube': 0, 'cylinder': 1, 'sphere': 2, 'tictac': 3}
 target_class = 'sphere'
+working_dir = f'ACE_output/3dshapes_{target_class}'
 bottlenecks = ['conv2d_3']
 source_dir = './data/ACE_3dshapes_toy'
+num_random_concepts = 5
 
 # related DIRs on CNS to store results #######
 discovered_concepts_dir = os.path.join(working_dir, 'concepts/')
@@ -65,7 +66,7 @@ else:
 # prepare data for ACE
 if not data_prepared:
     ace_create_source_dir_from_array(X_train, y_train, target_class, source_dir, class_to_id,
-                                     num_random_concepts=5, max_imgs_target_class=500, ow=False)
+                                     num_random_concepts=num_random_concepts, max_imgs_target_class=500, ow=False)
 
 # run ACE
 ace = ACE(model, bottlenecks, target_class, source_dir,

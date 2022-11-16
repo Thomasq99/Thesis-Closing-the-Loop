@@ -106,6 +106,8 @@ venv.bak/
 # mypy
 .mypy_cache/
 
-# data folder
+# folders
 data/
+models/
+ACE_output/
 

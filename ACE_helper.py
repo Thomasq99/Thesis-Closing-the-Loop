@@ -168,7 +168,7 @@ def get_gradients_of_images(images: npt.ArrayLike, model: tf.keras.Model, class_
 
     #TODO https://github.com/tensorflow/tcav/issues/124 shows that taking the gradients w.r.t. the logits gives a different answer
     #TODO might need to change this to loss instead of logits and compare.
-    grad_model = tf.keras.Model(inputs=model.inputs, outputs=[bottleneck_layer, model.output])
+    grad_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(bottleneck_layer).output, model.output])
     with tf.GradientTape() as tape:
         bottleneck_layers_out, predictions = grad_model(images)
         logit = predictions[:, class_id]
@@ -193,7 +193,7 @@ def save_images(addresses, images):
         addresses = image_addresses
     assert len(addresses) == len(images), 'Invalid number of addresses'
     for address, image in zip(addresses, images):
-        with open(address, 'w') as f:
+        with open(address, 'wb') as f:
             Image.fromarray(image).save(f, format='PNG')
 
 

@@ -31,7 +31,14 @@ class ACE:
         Ghorbani, A., Wexler, J., Zou, J., &#38; Kim, B. (2019). Towards automatic concept-based explanations.
         Advances in Neural Information Processing Systems. https://github.com/amiratag/ACE.
 
-        Explanation .... TODO add explanation
+        ACE works in three stages.
+        First, a segmentation method is used to segment the image in multi resolution image patches,
+        For example, an image can be segmented in 15,50,80 different patches.
+
+        Secondly, these patches are clustered together to be concepts. Outlier clusters are removed. These clusters
+        represent concepts.
+
+        Finally, using CAV and TCAVs these concepts are created and the corresponding TCAV scores are computed.
     """
     # TODO add work for grey scale images
     def __init__(self, model: tf.keras.Model, bottlenecks: List, target_class: str, source_dir: str, activation_dir: str,
@@ -572,7 +579,7 @@ class ACE:
             tcav_score_images = raw_imgs[-self.max_imgs:]
         gradients = self._return_gradients(tcav_score_images)
         for bn in self.bottlenecks:
-            for concept in self.dic[bn]['concepts'] + [self.random_concept]:
+            for concept in self.concept_dict[bn]['concepts'] + [self.random_concept]:
                 def t_func(rnd):
                     return self._tcav_score(bn, concept, rnd, gradients)
 
@@ -616,3 +623,19 @@ class ACE:
                     concepts_to_delete.append((bottleneck, concept))
         for bottleneck, concept in concepts_to_delete:
             self.delete_concept(bottleneck, concept)
+
+    def _sort_concepts(self, scores: Dict):
+        """Sort concepts based on average TCAV scores
+
+        @param scores: Dictionary containing the tcav scores for each concept and bottleneck in the form of:
+        {bottleneck: concept: [tcav_scores],... }
+        """
+        for bottleneck in self.bottlenecks:
+            tcavs = []
+            for concept in self.concept_dict[bottleneck]['concepts']:
+                tcavs.append(np.mean(scores[bottleneck][concept]))
+            concepts = []
+            for idx in np.argsort(tcavs)[::-1]:
+                concepts.append(self.concept_dict[bottleneck]['concepts'][idx])
+            self.concept_dict[bottleneck]['concepts'] = concepts
+
