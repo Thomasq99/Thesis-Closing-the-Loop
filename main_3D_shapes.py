@@ -14,7 +14,7 @@ target_class = 'sphere'
 working_dir = f'ACE_output/3dshapes_{target_class}'
 bottlenecks = ['conv2d_3']
 source_dir = './data/ACE_3dshapes_toy'
-num_random_concepts = 5
+num_random_concepts = 20
 
 # related DIRs on CNS to store results #######
 discovered_concepts_dir = os.path.join(working_dir, 'concepts/')
@@ -65,13 +65,17 @@ else:
 
 # prepare data for ACE
 if not data_prepared:
+    with h5py.File('./data/3dshapes_toy.h5', 'r') as data:
+        X_train = np.array(data['X_train'])
+        y_test = np.array(data['y_test'])
+
     ace_create_source_dir_from_array(X_train, y_train, target_class, source_dir, class_to_id,
                                      num_random_concepts=num_random_concepts, max_imgs_target_class=500, ow=False)
 
 # run ACE
 ace = ACE(model, bottlenecks, target_class, source_dir,
           activations_dir, cavs_dir, random_concept, class_to_id,
-          num_random_concepts=5)
+          num_random_concepts=num_random_concepts, num_workers=100)
 
 # create patches
 print("Creating patches")
@@ -96,6 +100,7 @@ cav_accuracies = ace.cavs(min_acc=0.0)
 scores = ace.tcavs(test=False)
 save_ace_report(ace, cav_accuracies, scores, results_summaries_dir + 'ace_results.txt')
 
+print('Started plotting concepts')
 # Plot examples of discovered concepts
 for bottleneck in ace.bottlenecks:
     plot_concepts(ace, bottleneck, 10, address=results_dir)

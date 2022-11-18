@@ -7,10 +7,10 @@ import numpy.typing as npt
 import matplotlib.gridspec as gridspec
 from skimage.segmentation import mark_boundaries
 from matplotlib import pyplot as plt
-
+import json
 
 def ace_create_source_dir_from_array(images, label, target_class, source_dir, class_to_id, max_imgs_target_class=100,
-                                     max_imgs_random=500, num_random_concepts=2, ow=True) -> None:
+                                     max_imgs_random=500, num_random_concepts=20, ow=False) -> None:
     """
 
     @param images:
@@ -44,6 +44,65 @@ def ace_create_source_dir_from_array(images, label, target_class, source_dir, cl
             print(f'{output_dir} was already created and already has enough images')
 
 
+def ace_create_source_dir_imagenet(imagenet_folder_path, source_dir, target_class, random_concept='random_discovery', target_shape=(299,299),
+                                   num_random_concepts=20, max_imgs_target_class=100, ow=False):
+
+    with open(os.path.join(imagenet_folder_path, 'imagenet_class_index.json')) as jsonFile:
+        imagenet_dct = json.load(jsonFile)
+        jsonFile.close()
+
+    class_to_id = {}
+    id_to_folder = {}
+    for key, value in imagenet_dct.items():
+        id_to_folder[int(key)] = value[0]
+        class_to_id[value[1]] = int(key)
+
+    output_dir_lst = [f'{source_dir}/{target_class}'] + [f'{source_dir}/{random_concept}'] + \
+                     [f'{source_dir}/random500_{i}' for i in range(num_random_concepts)]
+
+    for output_dir in output_dir_lst:
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+            no_of_imgs = 0
+        elif ow:  # overwrite current images
+            no_of_imgs = 0
+        else:  # use previous images
+            no_of_imgs = len(os.listdir(output_dir))
+
+        if output_dir.endswith(target_class) and no_of_imgs < max_imgs_target_class:
+            folder_name = id_to_folder[class_to_id[target_class]]
+            for folder in ['train.X1', 'train.X2', 'train.X3', 'train.X4']:
+                if folder_name in os.listdir(os.path.join(imagenet_folder_path, folder)):
+                    target_class_loc = os.path.join(imagenet_folder_path, folder, folder_name)
+                else:
+                    print(f'{target_class} not in {folder}')
+
+            images_names_to_copy = np.random.choice(np.array(os.listdir(target_class_loc)), max_imgs_target_class,
+                                                    replace=False)
+            for image_name in images_names_to_copy:
+                img = Image.open(os.path.join(target_class_loc, image_name))
+                img = img.resize(target_shape).convert('RGB')
+                img.save(os.path.join(output_dir, f'img_{no_of_imgs}.png'))
+                no_of_imgs += 1
+                if no_of_imgs >= 500:
+                    break
+            print(f'{output_dir} created')
+
+        elif not output_dir.endswith(target_class) and no_of_imgs < 500:
+            for i in range(no_of_imgs, 500):
+                train_folder = np.random.choice(np.array(['train.X1', 'train.X2', 'train.X3', 'train.X4']))
+                class_folder = os.path.join(os.path.join(imagenet_folder_path, train_folder),
+                                            np.random.choice(np.array(os.listdir(os.path.join(imagenet_folder_path, train_folder)))))
+                image_path = os.path.join(class_folder, np.random.choice(np.array(os.listdir(class_folder))))
+                img = Image.open(image_path)
+                img = img.resize(target_shape).convert('RGB')
+                img.save(os.path.join(output_dir, f'img_{i}.png'))
+            print(f'{output_dir} created')
+        else:
+            print(f'{output_dir} was already created and already has enough images')
+    return class_to_id
+
+
 def create_concept(output_dir, images, max_imgs, no_of_imgs) -> None:
     """
 
@@ -61,7 +120,7 @@ def create_concept(output_dir, images, max_imgs, no_of_imgs) -> None:
     np.random.shuffle(images)
     for idx, img in enumerate(images[:imgs_needed, :]):
         image = Image.fromarray(img)
-        image.save(f'{output_dir}/img_{idx + no_of_imgs}.jpg')
+        image.save(f'{output_dir}/img_{idx + no_of_imgs}.png')
 
 
 def load_image_from_file(filename, shape):
@@ -98,9 +157,7 @@ def load_image_from_file(filename, shape):
 
 
 def load_images_from_files(filenames, max_imgs=500, return_filenames=False,
-                           do_shuffle=True, run_parallel=True,
-                           shape=(64, 64),
-                           num_workers=100):
+                           do_shuffle=True, run_parallel=True, shape=(299, 299), num_workers=100):
     """Return image arrays from filenames.
     Args:
     filenames: locations of image files.
@@ -134,9 +191,9 @@ def load_images_from_files(filenames, max_imgs=500, return_filenames=False,
             if return_filenames:
                 final_filenames.append(filename)
     if return_filenames:
-        return np.array(imgs), final_filenames
+        return np.array(imgs, dtype=object).astype(np.float32), final_filenames
     else:
-        return np.array(imgs)
+        return np.array(imgs, dtype=object).astype(np.float32)
 
 
 def get_activations_of_images(images: npt.ArrayLike, model: tf.keras.Model, bottleneck_layer: str) -> npt.ArrayLike:
@@ -145,12 +202,13 @@ def get_activations_of_images(images: npt.ArrayLike, model: tf.keras.Model, bott
     @param images: Array of the form (n, w, h, c), where n is the number of images, w is the width of an image,
      h is the height of an image, and c is the number of channels. Usually 3 since ACE only works on RGB images.
     @param model: trained tf.keras.Model used to get the activations.
-    @param bottleneck_layer: str depicting the bottlneck layer for which the activations need to be computed.
+    @param bottleneck_layer: str depicting the bottleneck layer for which the activations need to be computed.
     @return: Array denoting the activations of the images.
     """
+
     bottleneck_model = tf.keras.Model(inputs=model.input,
                                       outputs=model.get_layer(bottleneck_layer).output)
-    activations = bottleneck_model.predict(images, batch_size=128).squeeze()
+    activations = bottleneck_model.predict(images, batch_size=32).squeeze()
     return activations
 
 
@@ -165,9 +223,6 @@ def get_gradients_of_images(images: npt.ArrayLike, model: tf.keras.Model, class_
     @param bottleneck_layer: Name of the bottleneck_layer.
     @return: gradients
     """
-
-    #TODO https://github.com/tensorflow/tcav/issues/124 shows that taking the gradients w.r.t. the logits gives a different answer
-    #TODO might need to change this to loss instead of logits and compare.
     grad_model = tf.keras.Model(inputs=model.inputs, outputs=[model.get_layer(bottleneck_layer).output, model.output])
     with tf.GradientTape() as tape:
         bottleneck_layers_out, predictions = grad_model(images)
@@ -244,7 +299,8 @@ def save_ace_report(cd, accs, scores, address):
         report += '\n'
         for concept in cd.concept_dict[bn]['concepts']:
             pvalue = cd.do_statistical_testings(scores[bn][concept], scores[bn][cd.random_concept])
-            report += '\n{}:{}:{},{}'.format(bn, concept,np.mean(scores[bn][concept]), pvalue)
+            report += '\n{}:{}:{},{}'.format(bn, concept, np.mean(scores[bn][concept]), pvalue)
+        report += '\n{}:{}:{},{}'.format(bn, cd.random_concept, np.mean(scores[bn][cd.random_concept]), 'na')
     with open(address, 'a') as f:
         f.write(report)
 
@@ -282,14 +338,12 @@ def plot_concepts(cd, bottleneck, num=10, address=None, mode='diverse', concepts
             idxs = np.random.permutation(np.arange(len(concept_images)))
         elif mode == 'diverse':
             idxs = []
-            while True:
+            while len(idxs) < len(concept_images):
                 seen = set()
                 for idx in range(len(concept_images)):
                     if concept_image_numbers[idx] not in seen and idx not in idxs:
                         seen.add(concept_image_numbers[idx])
                         idxs.append(idx)
-                    if len(idxs) == len(concept_images):
-                        break
         else:
             raise ValueError('Invalid mode!')
         idxs = idxs[:num]
@@ -313,7 +367,6 @@ def plot_concepts(cd, bottleneck, num=10, address=None, mode='diverse', concepts
             fig.add_subplot(ax)
     plt.suptitle(bottleneck)
     if address is not None:
-        with open(address + bottleneck + '.png', 'w') as f:
-            fig.savefig(f)
+        fig.savefig(address + bottleneck + '.png')
         plt.clf()
         plt.close(fig)

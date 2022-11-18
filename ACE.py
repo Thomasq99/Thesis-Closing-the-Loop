@@ -42,8 +42,8 @@ class ACE:
     """
     # TODO add work for grey scale images
     def __init__(self, model: tf.keras.Model, bottlenecks: List, target_class: str, source_dir: str, activation_dir: str,
-                 cav_dir: str, random_concept: str, class_to_id: Dict, average_image_value: int = 117, num_workers: int = 20,
-                 channel_mean: bool = True, max_imgs: int = 40, min_imgs: int = 20, num_random_concepts: int = 2,
+                 cav_dir: str, random_concept: str, class_to_id: Dict, average_image_value: int = 117, num_workers: int = 0,
+                 channel_mean: bool = True, max_imgs: int = 40, min_imgs: int = 20, num_random_concepts: int = 20,
                  num_discovery_imgs=40) -> None:
         """TODO add explanation
 
@@ -73,7 +73,7 @@ class ACE:
         self.random_concept = random_concept
         self.class_to_id = class_to_id
         self.average_image_value = average_image_value # 117 is default zero value for Inception V3
-        self.image_shape = model.layers[0].input_shape[1:3]  # retrieve image shape from the model
+        self.image_shape = model.input.shape[1:3]  # retrieve image shape from the model
         self.num_workers = num_workers
         self.channel_mean = channel_mean
         self.max_imgs = max_imgs
@@ -82,7 +82,6 @@ class ACE:
         if num_discovery_imgs is None:
             num_discovery_imgs = max_imgs
         self.num_discovery_imgs = num_discovery_imgs
-
     def load_concept_imgs(self, concept, max_imgs = 1000):
         """Loads all colored images of a concept or class. Rescales the images to self.image_shape if needed.
 
@@ -139,7 +138,6 @@ class ACE:
         else:
             # no parallelism used
             for idx, img in enumerate(self.discovery_images):
-                print(img.shape)
                 image_superpixels, image_patches = self.create_patches_of_img(
                     img, method, param_dict)
                 for superpixel, patch in zip(image_superpixels, image_patches):
@@ -209,7 +207,7 @@ class ACE:
 
             # for each segmentation class find the unique segmentations (remove small or too similar masks)
             for s in range(segments.min(), segments.max() + 1):
-                mask = (segments == s).astype(float)
+                mask = (segments == s).astype(np.float32)
                 # check if masks are not too similar or too small
                 if np.mean(mask) > 0.001:  # if segment is larger than 1% of the image
                     unique = True
@@ -243,7 +241,7 @@ class ACE:
         mask_expanded = np.expand_dims(mask, -1)
         #  change the zeros in the image to be the average value to differentiate padded pixels from black pixels
         patch = (mask_expanded * image + (
-                1 - mask_expanded) * float(self.average_image_value) / 255)
+                1 - mask_expanded) * np.float32(self.average_image_value) / 255)
 
         # Get the patch in the image
         ones = np.asarray(mask == 1).nonzero()
@@ -251,7 +249,7 @@ class ACE:
         image = Image.fromarray((patch[h1:h2, w1:w2] * 255).astype(np.uint8))
         # resize the patch to be the same size as the original image using the BICUBIC interpolation method
         image_resized = np.asarray(image.resize(self.image_shape,
-                                              Image.Resampling.BICUBIC)).astype(float) / 255
+                                              Image.Resampling.BICUBIC)).astype(np.float32) / 255
         return image_resized, patch
 
     def _patch_activations(self, images: npt.ArrayLike, bottleneck_layer) -> npt.ArrayLike:
@@ -341,7 +339,7 @@ class ACE:
                           param_dicts=None):
         """Discovers the frequent occurring concepts in the target class.
 
-        Calculates self.dic, a dicationary containing all the information of the
+        Calculates self.dic, a dictionary containing all the information of the
         discovered concepts in the form of {'bottleneck layer name: bn_dic} where
         bn_dic itself is in the form of {'concepts:list of concepts,
         'concept name': concept_dic} where the concept_dic is in the form of
@@ -554,8 +552,9 @@ class ACE:
         cav_ = self.load_cav_direction(concept, random_concept, bottleneck_layer)
         directional_derivative = np.sum(gradients[bottleneck_layer] * cav_, -1)
         return np.mean(directional_derivative > 0)
+        #return np.mean(directional_derivative < 0)
         #TODO why did they have smaller than 0? I believe because they used loss instead of logits
-        #TODO there is discrepancy between the pytorch and tensorflow installation
+        #TODO there is discrepancy between the pytorch and tensorflow installation one uses loss and <0 other uses logits and <0
 
     def tcavs(self, test: bool = False, sort: bool = True, tcav_score_images=None):
         """Calculates TCAV scores for all discovered concepts and sorts concepts.
