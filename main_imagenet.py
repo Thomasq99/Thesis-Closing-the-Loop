@@ -41,7 +41,7 @@ def main(model, target_class, bottlenecks, imagenet_folder, source_dir, working_
         os.makedirs(results_summaries_dir)
 
     class_to_id = ace_create_source_dir_imagenet(imagenet_folder, source_dir, target_class,
-                                                 random_concept=random_concept, num_random_concepts=num_random_concepts)
+                                                 num_random_concepts=num_random_concepts)
 
     # run ACE
     ace = ACE(model, bottlenecks, target_class, source_dir,
@@ -49,7 +49,7 @@ def main(model, target_class, bottlenecks, imagenet_folder, source_dir, working_
               num_random_concepts=num_random_concepts, num_workers=0)
 
     # create patches
-    print("Creating patches")
+    print(f"Creating patches of images from {target_class}")
     ace.create_patches_for_data()
     image_dir = os.path.join(discovered_concepts_dir, 'images')
     os.makedirs(image_dir)
@@ -75,10 +75,11 @@ def main(model, target_class, bottlenecks, imagenet_folder, source_dir, working_
     print('Started plotting concepts')
     # Plot examples of discovered concepts
     for bottleneck in ace.bottlenecks:
-        plot_concepts(ace, bottleneck, 10, address=results_dir)
+        plot_concepts(ace, bottleneck, target_class, 10, address=results_dir, mode='max')
+
 
 model = tf.keras.applications.inception_v3.InceptionV3()
-target_class = 'pelican'
+target_class = 'toucan'
 bottlenecks = ['mixed8']
 imagenet_folder = './data/ImageNet'
 source_dir = './data/ACE_ImageNet'
