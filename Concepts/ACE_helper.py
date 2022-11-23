@@ -133,7 +133,6 @@ def ace_create_source_dir_imagenet(imagenet_folder_path: str, source_dir: str, t
                 no_of_imgs += 1
                 if no_of_imgs >= 500:
                     break
-            print(f'{output_dir} created')
 
         # create random_concepts
         elif not output_dir.endswith(target_class) and no_of_imgs < 500:
@@ -146,9 +145,6 @@ def ace_create_source_dir_imagenet(imagenet_folder_path: str, source_dir: str, t
                 img = Image.open(image_path)
                 img = img.resize(target_shape).convert('RGB')
                 img.save(os.path.join(output_dir, f'img_{i}.png'))
-            print(f'{output_dir} created')
-        else:
-            print(f'{output_dir} was already created and already has enough images')
     return class_to_id
 
 
@@ -231,17 +227,17 @@ def get_bottleneck_model(model: tf.keras.Model, bottleneck_layer: str) -> tf.ker
     """
     return tf.keras.Model(inputs=model.input, outputs=model.get_layer(bottleneck_layer).output)
 
+
 def get_activations_of_images(images: np.ndarray, bottleneck_model: tf.keras.Model) -> np.ndarray:
     """Returns an Array of activations of the bottleneck layer of the model for all images.
 
-    #TODO find out whether shape is corrrect
-    @param images: Array of the form (n, w, h, c), where n is the number of images, w is the width of an image,
+    @param images: Array of the form (n, h, w, c), where n is the number of images, w is the width of an image,
      h is the height of an image, and c is the number of channels. Usually 3 since ACE only works on RGB images.
     @param bottleneck_model: trained tf.keras.Model where the output is the output of the bottleneck model.
     @return: Array denoting the activations of the images.
     """
 
-    activations = bottleneck_model.predict(images, batch_size=32).squeeze()
+    activations = bottleneck_model.predict(images, batch_size=32, verbose=False).squeeze()
     return activations
 
 
@@ -299,7 +295,7 @@ def save_images(addresses: Union[List, str], images: List):
 
 def do_statistical_testings(samples1: List, samples2: List):
     """Conducts t-test to compare two set of samples. In particular, if the means of the two samples are
-    staistically different.
+    statistically different.
 
     @param samples1: First group of samples. In this use case, the TCAV scores of the concept.
     @param samples2: Second group of samples. In this use case, the TCAV scores of the random counterpart.
@@ -308,6 +304,7 @@ def do_statistical_testings(samples1: List, samples2: List):
     min_len = min(len(samples1), len(samples2))
     _, p = stats.ttest_rel(samples1[:min_len], samples2[:min_len])
     return p
+
 
 def save_concepts(cd, concepts_dir):
     """Saves discovered concepts' images and patches.
@@ -355,8 +352,8 @@ def save_ace_report(cd, accs, scores, address):
     for bn in cd.bottlenecks:
         report += '\n'
         for concept in cd.concept_dict[bn]['concepts']:
-            pvalue = cd.do_statistical_testings(scores[bn][concept], scores[bn][cd.random_concept])
-            report += '\n{}:{}:{},{}'.format(bn, concept, np.mean(scores[bn][concept]), pvalue)
+            p_value = do_statistical_testings(scores[bn][concept], scores[bn][cd.random_concept])
+            report += '\n{}:{},{},{}'.format(bn, concept, np.mean(scores[bn][concept]), p_value,)
         report += '\n{}:{}:{},{}'.format(bn, cd.random_concept, np.mean(scores[bn][cd.random_concept]), 'na')
     with open(address, 'a') as f:
         f.write(report)

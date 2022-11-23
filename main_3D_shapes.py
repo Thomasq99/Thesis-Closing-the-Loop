@@ -1,7 +1,7 @@
 import h5py
-from ACE import ACE
-from tensorflow.keras import datasets, layers, models
-from ACE_helper import *
+from Concepts.ACE import ACE
+from tensorflow.keras import layers, models
+from Concepts.ACE_helper import *
 import os
 import shutil
 

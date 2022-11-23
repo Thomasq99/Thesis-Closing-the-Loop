@@ -21,9 +21,11 @@ import tensorflow as tf
 import sklearn.cluster as cluster
 from sklearn.metrics.pairwise import euclidean_distances
 import os
-from ACE_helper import load_images_from_files, get_activations_of_images, get_gradients_of_images, \
+from .ACE_helper import load_images_from_files, get_activations_of_images, get_gradients_of_images, \
     get_grad_model, get_bottleneck_model, do_statistical_testings
-from tcav import cav
+from .CAV import CAV, get_or_train_cav
+
+# TODO fix multiprocessing error when no of workers is high
 
 
 class ACE:
@@ -45,24 +47,24 @@ class ACE:
                  activation_dir: str, cav_dir: str, random_concept: str, class_to_id: Dict,
                  average_image_value: int = 117, num_workers: int = 0, channel_mean: bool = True, max_imgs: int = 40,
                  min_imgs: int = 20, num_random_concepts: int = 20, num_discovery_imgs=40) -> None:
-        """TODO add explanation
+        """Runs concept discovery algorithm. For more information see ACE docstring.
 
-        @param tf.Keras.Model model: A trained tensorflow model for which the concepts need to be discovered.
-        @param List bottlenecks: A list of bottleneck layers for which ACE is performed.
-        @param str target_class: Name of the class for which the concepts need to be discovered.
-        @param str source_dir: Directory that contains folders of the images classes.
-        @param str activation_dir: Directory to save computed activations.
-        @param str cav_dir: Directory to save computed CAVs.
-        @param str random_concept: Name of the random_concept (used for statistical testing).
-        @param Dict class_to_id: Dictionary mapping the string representations to the integer representations
+        @param model: A trained tensorflow model for which the concepts need to be discovered.
+        @param bottlenecks: A list of bottleneck layers for which ACE is performed.
+        @param target_class: Name of the class for which the concepts need to be discovered.
+        @param source_dir: Directory that contains folders of the images classes.
+        @param activation_dir: Directory to save computed activations.
+        @param cav_dir: Directory to save computed CAVs.
+        @param random_concept: Name of the random_concept (used for statistical testing).
+        @param class_to_id: Dictionary mapping the string representations to the integer representations
             for all classes.
-        @param int average_image_value: An integer representing the average pixel value. Used for padding.
-        @param int num_workers: the number of worker threads to run in parallel.
-        @param bool channel_mean: A boolean indicating whether or not to average out activations
+        @param average_image_value: An integer representing the average pixel value. Used for padding.
+        @param num_workers: the number of worker threads to run in parallel.
+        @param channel_mean: A boolean indicating whether to average out activations
             across multiple channels.
-        @param int max_imgs: Maximum number of patches in a discovered concept.
-        @param int min_imgs: minimum number of patches in a discovered concept for the concept to be accepted.
-        @param: num_discovery_images: Number of images used for concept discovery. If None, will use max_imgs instead.
+        @param max_imgs: Maximum number of patches in a discovered concept.
+        @param min_imgs: minimum number of patches in a discovered concept for the concept to be accepted.
+        @param num_discovery_imgs: Number of images used for concept discovery. If None, will use max_imgs instead.
         """
         self.model = model
         self.bottlenecks = bottlenecks
@@ -439,10 +441,11 @@ class ACE:
           @return The accuracy of the computed CAV.
         """
         act_r = self._random_concept_activations(bottleneck, bottleneck_model, random_concept)
-        cav_instance = cav.get_or_train_cav([concept, random_concept], bottleneck,
-                                            {concept: {bottleneck: act_c}, random_concept: {bottleneck: act_r}},
-                                            cav_dir=self.cav_dir, overwrite=ow)
-        return cav_instance.accuracies['overall']
+        act_r = act_r.reshape((act_r.shape[0], -1))
+        cav_instance = get_or_train_cav([concept, random_concept], bottleneck,
+                                            {concept: act_c, random_concept: act_r},
+                                            cav_dir=self.cav_dir, ow=ow)
+        return cav_instance.accuracy
 
     def _concept_cavs(self, bottleneck, bottleneck_model, concept, activations, randoms=None, ow=True):
         """Calculates CAVs of a concept versus all the random counterparts.
@@ -454,6 +457,7 @@ class ACE:
         @param ow: If True, overwrites existing CAVs.
         @return accuracies: A List of the accuracies of the concept versus all random counterparts.
         """
+        activations = activations.reshape((activations.shape[0], -1))
         if randoms is None:
             randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]
         if self.num_workers:
@@ -515,19 +519,6 @@ class ACE:
             self.concept_dict[bottleneck_layer]['concepts'].\
                 pop(self.concept_dict[bottleneck_layer]['concepts'].index(concept))
 
-    def load_cav_direction(self, concept, random_concept, bottleneck_layer):
-        """Loads an already computed cav.
-
-        @param concept: the name of the concept which CAV has to be loaded.
-        @param random_concept: The name of the random concept for which the CAV has been trained against.
-        @param bottleneck_layer: The name of the bottleneck_layer for which the CAV has been computed.
-        @return The CAV instance (normalized by vector norm2).
-        """
-        cav_key = cav.CAV.cav_key([concept, random_concept], bottleneck_layer, 'linear', 0.01)
-        cav_path = os.path.join(self.cav_dir, cav_key.replace('/', '.') + '.pkl')
-        vector = cav.CAV.load_cav(cav_path).cavs[0]
-        return np.expand_dims(vector, 0) / np.linalg.norm(vector, ord=2)
-
     def _return_gradients(self, images):
         """For the given images calculates the gradient tensors. Represents the first term of the directional derivative
         in the TCAV paper. Kim, B., Wattenberg, M., Gilmer, J., Cai, C., Wexler, J., Viegas, F.,; Sayres, R. (2018).
@@ -555,8 +546,8 @@ class ACE:
         @param gradients: Dict of gradients of tcav_score_images.
         @return TCAV score of the concept w.r.t. the given random concept.
         """
-        cav_ = self.load_cav_direction(concept, random_concept, bottleneck_layer)
-        directional_derivative = np.sum(gradients[bottleneck_layer] * cav_, -1)
+        cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bottleneck_layer}-{concept}-{random_concept}.pkl'))
+        directional_derivative = np.sum(gradients[bottleneck_layer] * cav.cav, -1)
         return np.mean(directional_derivative > 0)
 
     def tcavs(self, test: bool = False, sort: bool = True, tcav_score_images=None):
@@ -593,7 +584,6 @@ class ACE:
             self._sort_concepts(tcav_scores)
         return tcav_scores
 
-
     def test_and_remove_concepts(self, tcav_scores: Dict):
         """Using TCAV scores of the discovered concepts versus the random_counterpart
         concept, performs statistical t-tests and removes concepts that have a p-value larger than 0.01.
@@ -604,7 +594,7 @@ class ACE:
         for bottleneck in self.bottlenecks:
             for concept in self.concept_dict[bottleneck]['concepts']:
                 p_value = do_statistical_testings(tcav_scores[bottleneck][concept],
-                                                 tcav_scores[bottleneck][self.random_concept])
+                                                  tcav_scores[bottleneck][self.random_concept])
                 if p_value > 0.01:
                     concepts_to_delete.append((bottleneck, concept))
         for bottleneck, concept in concepts_to_delete:
@@ -624,3 +614,48 @@ class ACE:
             for idx in np.argsort(tcavs)[::-1]:
                 concepts.append(self.concept_dict[bottleneck]['concepts'][idx])
             self.concept_dict[bottleneck]['concepts'] = concepts
+
+    def _project_onto_concept(self, bottleneck: str, activations: np.ndarray, concept: str, randoms: List):
+        """Transforms data points from activations space to concept space. The projection is normalized
+        by the squared L-2 norm of the corresponding CAV
+
+
+        @param bottleneck: Name of the bottleneck layer.
+        @param activations: Array of activation vectors of the data points in the bottleneck layer.
+        @param concept: Name of the concept to which concept's space the activations will be transformed.
+        @param randoms: List of random concept names against which the concept is trained. If there are 20 randoms.
+            there will be 20 CAVs (one for each random direction).
+        @return: The projection of activations of all images on all CAV directions of the given concept.
+            Resulting shape is (no_of_imgs, no_of_random_concepts).
+        """
+        # CAVs are L-2 normalized #TODO add intercepts, vector operations
+        def t_func(rnd):
+            cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bottleneck}-{concept}-{rnd}.pkl'))
+            return ((cav.cav @ activations.T) / cav.norm).reshape(-1)
+
+        if self.num_workers:
+            pool = multiprocessing.Pool(self.num_workers)
+            concept_projection = pool.map(lambda rnd: t_func(rnd), randoms)
+        else:
+            concept_projection = [t_func(rnd) for rnd in randoms]
+        return np.stack(concept_projection, axis=-1)
+
+    def project_onto_concept_space(self, bottleneck: str, images: np.ndarray, mean: bool = True):
+        """Transforms images from pixel space to (L-2 squared normalized) concept space.
+
+        @param bottleneck: Name of the bottleneck layer.
+        @param images: Array containing the images to be transformed to concept space.
+        @param mean: If True, averages out the random directions. The concept space of each concept would be the
+            average inner product of all that concepts' CAV vectors rather than the stacked up version.
+        @return: The images projected onto the concept space of all concepts in the bottleneck layer.
+        """
+        concept_space = np.zeros((len(images), len(self.concept_dict[bottleneck]['concepts']),
+                                  self.num_random_concepts))
+        img_activations = get_activations_of_images(images, get_bottleneck_model(self.model, bottleneck))\
+            .reshape([len(images), -1])
+        randoms = ['random500_{}'.format(i) for i in range(self.num_random_concepts)]
+        for i, concept in enumerate(self.concept_dict[bottleneck]['concepts']):
+            concept_space[:, i, :] = self._project_onto_concept(bottleneck, img_activations, concept, randoms)
+        if mean:
+            concept_space = np.mean(concept_space, -1)
+        return concept_space
