@@ -90,6 +90,9 @@ class ACE:
         self.image_numbers = None
         self.patches = None
 
+    def __repr__(self):
+        return f'ACE({self.model}, {self.bottlenecks}, {self.target_class})'
+
     def load_concept_imgs(self, concept: str, max_imgs: int = 1000):
         """Loads all colored images of a concept or class. Rescales the images to self.image_shape if needed.
 
@@ -470,12 +473,15 @@ class ACE:
                 accuracies.append(self._calculate_cav(concept, rnd, bottleneck, bottleneck_model, activations, ow))
         return accuracies
 
-    def cavs(self, min_acc=0., ow=True):
+    def cavs(self, min_acc: float = 0., ow: bool = True, in_memory: bool = True, concept_dir: str = '') -> Dict:
         """This method calculates and saves CAVs for all the discovered concepts
         versus all random concepts in all the bottleneck layers.
 
         @param min_acc: Delete discovered concept if average classification accuracy of the CAV is less than min_acc.
         @param ow: If True, overwrites already calculated CAVs.
+        @param in_memory: If True, concept images are stored in the self.concept_dict
+            If False, concept images are stored in the concept_dir.
+        @param concept_dir: Directory where concept images are stored.
         @return acc: A dictionary of classification accuracy of linear boundaries orthogonal to CAV vectors of the form
          {'bottleneck layer':{'concept name':[list of accuracies], ...}, ...}. Also includes the random concept and the
          target_class as 'concept name'.
@@ -487,7 +493,12 @@ class ACE:
             # prevent tf.function tracing by defining model before outside for loop
             bottleneck_model = get_bottleneck_model(self.model, bottleneck)
             for concept in self.concept_dict[bottleneck]['concepts']:
-                concept_imgs = self.concept_dict[bottleneck][concept]['images']
+                if in_memory:
+                    concept_imgs = self.concept_dict[bottleneck][concept]['images']
+                else:
+                    filepaths = [os.path.join(concept_dir, img) for img in
+                                 os.listdir(os.path.join(concept_dir, f'{bottleneck}_{concept}'))]
+                    concept_imgs = load_images_from_files(filepaths, do_shuffle=False)
                 concept_acts = get_activations_of_images(concept_imgs, bottleneck_model)
                 acc[bottleneck][concept] = self._concept_cavs(bottleneck, bottleneck_model, concept, concept_acts,
                                                               ow=ow)

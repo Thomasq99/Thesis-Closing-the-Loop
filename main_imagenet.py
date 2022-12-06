@@ -5,7 +5,7 @@ import shutil
 import numpy as np
 import pickle as p
 import tensorflow as tf
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # my GPU is too small to save enough images in its VRAM to get the gradients
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # my GPU is too small to save enough images in its V-RAM to get the gradients
 
 
 def main(model, target_class, bottlenecks, imagenet_folder, source_dir, working_dir, num_workers=0,
