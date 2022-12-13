@@ -32,7 +32,7 @@ class CAV:
         cav.accuracy = cav_dct['accuracy']
         return cav
 
-    def __init__(self, bottleneck, concept, random_counterpart):
+    def __init__(self, bottleneck: str, concept: str, random_counterpart: str):
         self.bottleneck = bottleneck
         self.concept = concept
         self.random_counterpart = random_counterpart
@@ -40,6 +40,7 @@ class CAV:
         self.intercept = None
         self.norm = None
         self.accuracy = None
+        self.file_name = f'{self.bottleneck}-{self.concept}-{self.random_counterpart}.pkl'
 
     def save_cav(self, cav_dir: str) -> None:
         """Saves a CAV in the cav_dir in the form of a dictionary
@@ -50,11 +51,12 @@ class CAV:
                    'random_counterpart': self.random_counterpart, 'cav': self.cav, 'intercept': self.intercept,
                    'norm': self.norm, 'accuracy': self.accuracy}
 
-        file_path = os.path.join(cav_dir, f'{self.bottleneck}-{self.concept}-{self.random_counterpart}.pkl')
+        file_path = os.path.join(cav_dir,
+                                 self.file_name)
         with open(file_path, 'wb') as file:
             p.dump(cav_dct, file, protocol=-1)
 
-    def train_cav(self, act_dct: Dict, param_dct: Dict):
+    def train_cav(self, act_dct: Dict, param_dct: Dict):  # TODO add param_dict
         """Trains a CAV by fitting an SVM to predict the concept from the concept and its random counterpart.
 
         @param act_dct: Dictionary containing the activations of the concept and random counterpart. Of the form:
@@ -79,7 +81,7 @@ class CAV:
         self.norm = np.linalg.norm(self.cav, ord=2)
 
 
-def get_or_train_cav(concepts: List, bottleneck: str, act_dct: Dict, cav_dir: str,
+def get_or_train_cav(concepts: List, bottleneck: str,  cav_dir: str, act_dct: Dict,
                      param_dct: Optional[Dict] = None, ow: bool = False) -> 'CAV':
     """If exists loads a trained CAV, otherwise creates one.
 

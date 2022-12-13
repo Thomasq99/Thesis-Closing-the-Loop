@@ -5,7 +5,7 @@ import multiprocessing.dummy as multiprocessing
 import tensorflow as tf
 import matplotlib.gridspec as gridspec
 from skimage.segmentation import mark_boundaries
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
 import json
 from typing import Dict, Tuple, List, Union
 import scipy.stats as stats
@@ -175,7 +175,7 @@ def load_image_from_file(filename: str, shape: Tuple):
 
     except Exception as e:
         print(e)
-        return None
+        return
 
 
 def load_images_from_files(filenames: List, max_imgs: int = 500, return_filenames: bool = False,
@@ -192,26 +192,25 @@ def load_images_from_files(filenames: List, max_imgs: int = 500, return_filename
     @return Returns the loaded images. If return_filenames is True, also returns the filenames.
     """
     imgs = []
+    final_filenames = []
     if do_shuffle:
         np.random.shuffle(filenames)
-    if return_filenames:
-        final_filenames = []
 
-    # load images from filenames using parallelization
-    if num_workers:
+    if num_workers:  # load images from filenames using parallelization
         pool = multiprocessing.Pool(num_workers)
-        imgs = pool.map(lambda filename: load_image_from_file(filename, shape), filenames[:max_imgs])
+        imgs = pool.map(lambda fn: load_image_from_file(fn, shape), filenames[:max_imgs])
+        imgs = [img for img in imgs if img is not None]
+
         if return_filenames:
             final_filenames = [f for i, f in enumerate(filenames[:max_imgs]) if imgs[i] is not None]
-            imgs = [img for img in imgs if img is not None]
-    # load images from filenames iteratively.
-    else:
+    else:  # load images from filenames iteratively.
         for filename in filenames[:max_imgs]:
             img = load_image_from_file(filename, shape)
             if img is not None:
                 imgs.append(img)
             if return_filenames:
                 final_filenames.append(filename)
+
     if return_filenames:
         return np.array(imgs, dtype=object).astype(np.float32), final_filenames
     else:
@@ -313,9 +312,11 @@ def save_concepts(cd, concepts_dir):
     @param concepts_dir: The directory to save the concepts' images.
     """
     for bn in cd.bottlenecks:
+        concepts_dir_bn = os.path.join(concepts_dir, bn)
+        #os.makedirs(concepts_dir_bn)
         for concept in cd.concept_dict[bn]['concepts']:
-            patches_dir = os.path.join(concepts_dir, bn + '_' + concept + '_patches')
-            images_dir = os.path.join(concepts_dir, bn + '_' + concept)
+            patches_dir = os.path.join(concepts_dir_bn, concept + '_patches')
+            images_dir = os.path.join(concepts_dir_bn, concept)
             patches = (np.clip(cd.concept_dict[bn][concept]['patches'], 0, 1) * 255).astype(np.uint8)
             images = (np.clip(cd.concept_dict[bn][concept]['images'], 0, 1) * 255).astype(np.uint8)
             os.makedirs(patches_dir)
@@ -330,14 +331,14 @@ def save_concepts(cd, concepts_dir):
             save_images(image_addresses, images)
 
 
-def save_ace_report(cd, accs, scores, address):
+def save_ace_report(cd, accuracies, scores, address):
     """Saves TCAV scores.
 
     Saves the average CAV accuracies and average TCAV scores of the concepts
     discovered in ConceptDiscovery instance.
 
     @param cd: The ConceptDiscovery instance.
-    @param accs: The cav accuracy dictionary returned by cavs method of the ConceptDiscovery instance.
+    @param accuracies: The cav accuracy dictionary returned by cavs method of the ConceptDiscovery instance.
     @param scores: The tcav score dictionary returned by tcavs method of the ConceptDiscovery instance.
     @param address: The address to save the text file in.
     """
@@ -345,7 +346,7 @@ def save_ace_report(cd, accs, scores, address):
     for bn in cd.bottlenecks:
         report += '\n'
         for concept in cd.concept_dict[bn]['concepts']:
-            report += '\n' + bn + ':' + concept + ':' + str(np.mean(accs[bn][concept]))
+            report += '\n' + bn + ':' + concept + ':' + str(np.mean(accuracies[bn][concept]))
     with open(address, 'w') as f:
         f.write(report)
     report = '\n\n\t\t\t ---TCAV scores---'

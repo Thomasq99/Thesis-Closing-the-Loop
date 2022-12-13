@@ -11,7 +11,7 @@ Advances in Neural Information Processing Systems. https://github.com/amiratag/A
 
 The code is largely the same. Only minor changes, like not using tf.Session(), have been made.
 """
-
+import shutil
 import skimage.segmentation as segmentation
 import numpy as np
 from PIL import Image
@@ -43,8 +43,8 @@ class ACE:
         Finally, using CAV and TCAVs these concepts are created and the corresponding TCAV scores are computed.
     """
     # TODO add work for grey scale images
-    def __init__(self, model: tf.keras.Model, bottlenecks: List, target_class: str, source_dir: str,
-                 activation_dir: str, cav_dir: str, random_concept: str, class_to_id: Dict,
+    def __init__(self, model: tf.keras.Model, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
+                 random_concept: str, class_to_id: Dict,
                  average_image_value: int = 117, num_workers: int = 0, channel_mean: bool = True, max_imgs: int = 40,
                  min_imgs: int = 20, num_random_concepts: int = 20, num_discovery_imgs=40) -> None:
         """Runs concept discovery algorithm. For more information see ACE docstring.
@@ -53,8 +53,6 @@ class ACE:
         @param bottlenecks: A list of bottleneck layers for which ACE is performed.
         @param target_class: Name of the class for which the concepts need to be discovered.
         @param source_dir: Directory that contains folders of the images classes.
-        @param activation_dir: Directory to save computed activations.
-        @param cav_dir: Directory to save computed CAVs.
         @param random_concept: Name of the random_concept (used for statistical testing).
         @param class_to_id: Dictionary mapping the string representations to the integer representations
             for all classes.
@@ -69,9 +67,8 @@ class ACE:
         self.model = model
         self.bottlenecks = bottlenecks
         self.target_class = target_class
-        self.activation_dir = activation_dir
+        self.working_dir = working_dir
         self.source_dir = source_dir
-        self.cav_dir = cav_dir
         self.random_concept = random_concept
         self.class_to_id = class_to_id
         self.average_image_value = average_image_value  # 117 is default zero value for Inception V3
@@ -89,6 +86,9 @@ class ACE:
         self.dataset = None
         self.image_numbers = None
         self.patches = None
+        self.activation_dir = os.path.join(working_dir, 'acts/')
+        self.cav_dir = os.path.join(working_dir, 'cavs_temp/')
+        self.discovered_concepts_dir = os.path.join(working_dir, 'concepts/')
 
     def __repr__(self):
         return f'ACE({self.model}, {self.bottlenecks}, {self.target_class})'
@@ -133,12 +133,13 @@ class ACE:
             self.discovery_images = raw_imgs
         else:
             self.discovery_images = discovery_images
+
         # use multiple worker threads to extract patches in parallel
         if self.num_workers:
             pool = multiprocessing.Pool(self.num_workers)
             outputs = pool.map(
-                lambda img: self.create_patches_of_img(img, method, param_dict),
-                self.discovery_images)
+                lambda image: self.create_patches_of_img(image, method, param_dict), self.discovery_images)
+
             for idx, sp_outputs in enumerate(outputs):
                 image_superpixels, image_patches = sp_outputs
                 for superpixel, patch in zip(image_superpixels, image_patches):
@@ -148,8 +149,7 @@ class ACE:
         else:
             # no parallelism used
             for idx, img in enumerate(self.discovery_images):
-                image_superpixels, image_patches = self.create_patches_of_img(
-                    img, method, param_dict)
+                image_superpixels, image_patches = self.create_patches_of_img(img, method, param_dict)
                 for superpixel, patch in zip(image_superpixels, image_patches):
                     dataset.append(superpixel)
                     patches.append(patch)
@@ -157,13 +157,13 @@ class ACE:
 
         self.dataset, self.image_numbers, self.patches = np.array(dataset), np.array(image_numbers), np.array(patches)
 
-    def create_patches_of_img(self, img: np.ndarray, method: str = 'slic',
+    def create_patches_of_img(self, image: np.ndarray, method: str = 'slic',
                               param_dict: Optional[Dict] = None) -> Tuple[List, List]:
         """
         Extracts both the patches resized to original image size and the patches from a single image.
         Patches smaller than 1% of the image or patches too similar (jaccard > 0.5) to other patches are not included.
 
-        @param np.ndarray img: Numpy array representing a single image. The image needs to be non-normalized.
+        @param np.ndarray image: Numpy array representing a single image. The image needs to be non-normalized.
         @param str method: String representing the segmentation method to be used.
             One of slic, watershed, quickshift, or felzenszwalb.
         @param Dict param_dict: Dictionary representing the parameters of the segmentation method. The keys are the
@@ -171,54 +171,60 @@ class ACE:
         @return Tuple: Returns a tuple of all resized patches and original patches of a single image.
         @raise ValueError: if the chosen segmentation method is invalid.
         """
-        # Get the parameters of the chosen method
+        # get the parameters of the chosen method
         if param_dict is None:
             param_dict = {}
-        if method == 'slic':
-            n_segments = param_dict.get('n_segments', [15, 50, 80])
-            n_params = len(n_segments)
-            compactnesses = param_dict.get('compactness', [20] * n_params)
-            sigmas = param_dict.get('sigma', [1.] * n_params)
-        elif method == 'watershed':
-            markers = param_dict.get('marker', [15, 50, 80])
-            n_params = len(markers)
-            compactnesses = param_dict.get('compactness', [0.] * n_params)
-        elif method == 'quickshift':
-            max_dists = param_dict.get('max_dist', [20, 15, 10])
-            n_params = len(max_dists)
-            ratios = param_dict.get('ratio', [1.0] * n_params)
-            kernel_sizes = param_dict.get('kernel_size', [10] * n_params)
-        elif method == 'felzenszwalb':
-            scales = param_dict.get('scale', [1200, 500, 250])
-            n_params = len(scales)
-            sigmas = param_dict.get('sigma', [0.8] * n_params)
-            min_sizes = param_dict.get('min_size', [20] * n_params)
-        else:
-            raise ValueError('Invalid superpixel method!')
 
-        # Get segmentation masks of different resolutions for the chosen methods
+        # get segmentation masks of different resolutions for the chosen methods
         unique_masks = []
-        for i in range(n_params):
+        n_resolutions = param_dict.get('n_resolutions', 3)
+        for i in range(n_resolutions):
             param_masks = []
+
             if method == 'slic':
-                segments = segmentation.slic(
-                    img, n_segments=n_segments[i], compactness=compactnesses[i],
-                    sigma=sigmas[i])
+                # get parameters of segmentation
+                n_segments = param_dict.get('n_segments', [15, 50, 80])
+                compactnesses = param_dict.get('compactness', [20] * n_resolutions)
+                sigmas = param_dict.get('sigma', [1.] * n_resolutions)
+
+                # perform segmentation
+                segments = segmentation.slic(image, n_segments=n_segments[i], compactness=compactnesses[i],
+                                             sigma=sigmas[i])
+
             elif method == 'watershed':
-                segments = segmentation.watershed(
-                    img, markers=markers[i], compactness=compactnesses[i])
+                # get parameters of segmentation
+                markers = param_dict.get('marker', [15, 50, 80])
+                compactnesses = param_dict.get('compactness', [0.] * n_resolutions)
+
+                # perform segmentation
+                segments = segmentation.watershed(image, markers=markers[i], compactness=compactnesses[i])
+
             elif method == 'quickshift':
-                segments = segmentation.quickshift(
-                    img, kernel_size=kernel_sizes[i], max_dist=max_dists[i],
-                    ratio=ratios[i])
+                # get parameters of segmentation
+                max_dists = param_dict.get('max_dist', [20, 15, 10])
+                ratios = param_dict.get('ratio', [1.0] * n_resolutions)
+                kernel_sizes = param_dict.get('kernel_size', [10] * n_resolutions)
+
+                # perform segmentation
+                segments = segmentation.quickshift(image, kernel_size=kernel_sizes[i], max_dist=max_dists[i],
+                                                   ratio=ratios[i])
+
             elif method == 'felzenszwalb':
-                segments = segmentation.felzenszwalb(
-                    img, scale=scales[i], sigma=sigmas[i], min_size=min_sizes[i])
+                # get parameters of segmentation
+                scales = param_dict.get('scale', [1200, 500, 250])
+                sigmas = param_dict.get('sigma', [0.8] * n_resolutions)
+                min_sizes = param_dict.get('min_size', [20] * n_resolutions)
+
+                # perform segmentation
+                segments = segmentation.felzenszwalb(image, scale=scales[i], sigma=sigmas[i], min_size=min_sizes[i])
+
+            else:
+                raise ValueError('Invalid superpixel method!')
 
             # for each segmentation class find the unique segmentations (remove small or too similar masks)
             for s in range(segments.min(), segments.max() + 1):
                 mask = (segments == s).astype(np.float32)
-                # check if masks are not too similar or too small
+                # check if masks are not too similar to others or too small
                 if np.mean(mask) > 0.001:  # if segment is larger than 1% of the image
                     unique = True
                     for seen_mask in unique_masks:  # compare  current mask to previously found masks
@@ -234,7 +240,7 @@ class ACE:
         # resize patches to same size
         superpixels, patches = [], []
         while unique_masks:
-            superpixel, patch = self._extract_patch(img, unique_masks.pop())
+            superpixel, patch = self._extract_patch(image, unique_masks.pop())
             superpixels.append(superpixel)
             patches.append(patch)
         return superpixels, patches
@@ -249,20 +255,20 @@ class ACE:
         @return Tuple[np.ndarray, np.ndarray]: Returns a tuple consisting of a resized patch and the original patch.
         """
         mask_expanded = np.expand_dims(mask, -1)
-        #  change the zeros in the image to be the average value to differentiate padded pixels from black pixels
-        patch = (mask_expanded * image + (
-                1 - mask_expanded) * np.float32(self.average_image_value) / 255)
 
-        # Get the patch in the image
+        # change the zeros in the image to be the average value to differentiate padded pixels from black pixels
+        patch = (mask_expanded * image + (1 - mask_expanded) * np.float32(self.average_image_value) / 255)
+
+        # get the patch from the image
         ones = np.asarray(mask == 1).nonzero()
         h1, h2, w1, w2 = ones[0].min(), ones[0].max(), ones[1].min(), ones[1].max()
         image = Image.fromarray((patch[h1:h2, w1:w2] * 255).astype(np.uint8))
+
         # resize the patch to be the same size as the original image using the BICUBIC interpolation method
-        image_resized = np.asarray(image.resize(self.image_shape,
-                                                Image.Resampling.BICUBIC)).astype(np.float32) / 255
+        image_resized = np.asarray(image.resize(self.image_shape, Image.Resampling.BICUBIC)).astype(np.float32) / 255
         return image_resized, patch
 
-    def _patch_activations(self, images: np.ndarray, bottleneck_layer) -> np.ndarray:
+    def _patch_activations(self, images: np.ndarray, bottleneck_layer: str) -> np.ndarray:
         """Returns activations of the bottleneck layer of an array of images.
 
         @param np.ndarray images: Array of images on which to calculate the activations of the bottleneck layer.
@@ -299,54 +305,65 @@ class ACE:
         if param_dict is None:
             param_dict = {}
         centers = None
-        if method == 'KM':
+        cluster_costs = None
+
+        if method == 'KM':  # perform K-means clustering
             n_clusters = param_dict.pop('n_clusters', 25)
             km = cluster.KMeans(n_clusters)
             km.fit(activations)
             centers = km.cluster_centers_
-            d = np.linalg.norm(
-                np.expand_dims(activations, 1) - np.expand_dims(centers, 0), ord=2, axis=-1)
-            cluster_labels, cluster_costs = np.argmin(d, -1), np.min(d, -1)
-        elif method == 'AP':
+
+            # compute distances from points to centers
+            distances = np.linalg.norm(np.expand_dims(activations, 1) - np.expand_dims(centers, 0), ord=2, axis=-1)
+            cluster_labels, cluster_costs = np.argmin(distances, -1), np.min(distances, -1)
+
+        elif method == 'AP':  # use Affinity Propagation
             damping = param_dict.pop('damping', 0.5)
             ca = cluster.AffinityPropagation(damping=damping)
             ca.fit(activations)
             centers = ca.cluster_centers_
-            d = np.linalg.norm(
-                np.expand_dims(activations, 1) - np.expand_dims(centers, 0), ord=2, axis=-1)
-            cluster_labels, cluster_costs = np.argmin(d, -1), np.min(d, -1)
-        elif method == 'MS':
+
+            # compute distances from points to centers
+            distances = np.linalg.norm(np.expand_dims(activations, 1) - np.expand_dims(centers, 0), ord=2, axis=-1)
+            cluster_labels, cluster_costs = np.argmin(distances, -1), np.min(distances, -1)
+
+        elif method == 'MS':  # perform Mean Shift clustering
             ms = cluster.MeanShift(n_jobs=self.num_workers)
             cluster_labels = ms.fit_predict(activations)
-        elif method == 'SC':
+
+        elif method == 'SC':  # perform Spectral clustering
             n_clusters = param_dict.pop('n_clusters', 25)
-            sc = cluster.SpectralClustering(
-                n_clusters=n_clusters, n_jobs=self.num_workers)
+            sc = cluster.SpectralClustering(n_clusters=n_clusters, n_jobs=self.num_workers)
             cluster_labels = sc.fit_predict(activations)
-        elif method == 'DB':
+
+        elif method == 'DB':  # perform DBSCAN
             eps = param_dict.pop('eps', 0.5)
             min_samples = param_dict.pop('min_samples', 20)
             sc = cluster.DBSCAN(eps, min_samples=min_samples, n_jobs=self.num_workers)
             cluster_labels = sc.fit_predict(activations)
+
         else:
             raise ValueError('Invalid Clustering Method!')
-        if centers is None:  # if clustering did not return cluster centers, use medoids as cluster center
-            centers = np.zeros((cluster_labels.max() + 1, activations.shape[1]))
+
+        # if clustering did not return cluster centers, use medoids as cluster center
+        if centers is None:
+            centers = np.zeros((np.max(cluster_labels) + 1, activations.shape[1]))
             cluster_costs = np.zeros(len(activations))
-            for cluster_label in range(cluster_labels.max() + 1):
+            for cluster_label in range(np.max(cluster_labels) + 1):
                 cluster_idxs = np.where(cluster_labels == cluster_label)[0]
                 cluster_points = activations[cluster_idxs]
-                pw_distances = euclidean_distances(cluster_points)
-                centers[cluster_label] = cluster_points[np.argmin(np.sum(pw_distances, -1))]
+                pairwise_distances = euclidean_distances(cluster_points)
+                centers[cluster_label] = cluster_points[np.argmin(np.sum(pairwise_distances, -1))]
                 cluster_costs[cluster_idxs] = np.linalg.norm(
                     activations[cluster_idxs] - np.expand_dims(centers[cluster_label], 0),
                     ord=2, axis=-1)
+
         return cluster_labels, cluster_costs, centers
 
     def discover_concepts(self,
-                          method='KM',
-                          activations=None,
-                          param_dicts=None):
+                          method: str = 'KM',
+                          activations: Optional[Dict] = None,
+                          param_dicts: Optional[Dict] = None):
         """Discovers the frequent occurring concepts in the target class.
 
         Calculates self.dic, a dictionary containing all the information of the
@@ -356,10 +373,10 @@ class ACE:
         {'images': resized patches of concept, 'patches': original patches of the
         concepts, 'image_numbers': image id of each patch}.
 
-        @param str method: Clustering method.
-        @param Dict activations: If activations are already calculated. If not calculates
+        @param method: Clustering method.
+        @param activations: dictionary if activations are already calculated. If not calculates
             them. Must be a dictionary in the form of {'bn':array, ...}.
-        @param Dict param_dicts: A dictionary in the format of {'bottleneck':param_dict,...}
+        @param param_dicts: A dictionary in the format of {'bottleneck':param_dict,...}
             where param_dict contains the clustering method's parameters
             in the form of {'param1':value, ...}. For instance for Kmeans
             {'n_clusters':25}. param_dicts can also be in the format
@@ -368,11 +385,14 @@ class ACE:
         """
         if param_dicts is None:
             param_dicts = {}
+
         if set(param_dicts.keys()) != set(self.bottlenecks):
             param_dicts = {bn: param_dicts for bn in self.bottlenecks}
         self.concept_dict = {}  # The main dictionary storing the concepts of the ConceptDiscovery class.
+
         for bn in self.bottlenecks:
             bn_dic = {}
+
             # compute the activations of the patches for each bottleneck
             if activations is None or bn not in activations.keys():
                 bn_activations = self._patch_activations(self.dataset, bn)
@@ -381,8 +401,9 @@ class ACE:
             # cluster the activations such that similar segments belong to the same cluster
             bn_dic['label'], bn_dic['cost'], centers = self._cluster(bn_activations, method, param_dicts[bn])
             concept_number, bn_dic['concepts'] = 0, []
-            # For each cluster compute how many segments belong to it relative to cluster size and amount of patches
-            # Remove outlier clusters
+
+            # for each cluster compute how many segments belong to it relative to cluster size and amount of patches
+            # subsequently remove outlier clusters
             for i in range(bn_dic['label'].max() + 1):
                 label_idxs = np.where(bn_dic['label'] == i)[0]  # idx of patches belonging to cluster i
                 if len(label_idxs) > self.min_imgs:
@@ -404,8 +425,7 @@ class ACE:
                         bn_dic[concept] = {
                             'images': self.dataset[concept_idxs],
                             'patches': self.patches[concept_idxs],
-                            'image_numbers': self.image_numbers[concept_idxs]
-                        }
+                            'image_numbers': self.image_numbers[concept_idxs]}
                         bn_dic[concept + '_center'] = centers[i]
             bn_dic.pop('label', None)
             bn_dic.pop('cost', None)
@@ -446,11 +466,10 @@ class ACE:
         act_r = self._random_concept_activations(bottleneck, bottleneck_model, random_concept)
         act_r = act_r.reshape((act_r.shape[0], -1))
         cav_instance = get_or_train_cav([concept, random_concept], bottleneck,
-                                            {concept: act_c, random_concept: act_r},
-                                            cav_dir=self.cav_dir, ow=ow)
+                                        act_dct={concept: act_c, random_concept: act_r}, cav_dir=self.cav_dir, ow=ow)
         return cav_instance.accuracy
 
-    def _concept_cavs(self, bottleneck, bottleneck_model, concept, activations, randoms=None, ow=True):
+    def _concept_cavs(self, bottleneck, bottleneck_model, concept, activations, randoms=None, ow=True) -> List:
         """Calculates CAVs of a concept versus all the random counterparts.
 
         @param bottleneck: Bottleneck layer name.
@@ -465,15 +484,17 @@ class ACE:
             randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]
         if self.num_workers:
             pool = multiprocessing.Pool(self.num_workers)
-            accuracies = pool.map(lambda rnd: self._calculate_cav(concept, rnd, bottleneck, bottleneck_model,
-                                                                  activations, ow), randoms)
+            accuracies = pool.map(
+                lambda random: self._calculate_cav(concept, random, bottleneck, bottleneck_model, activations, ow),
+                randoms)
         else:
             accuracies = []
-            for rnd in randoms:
-                accuracies.append(self._calculate_cav(concept, rnd, bottleneck, bottleneck_model, activations, ow))
+            for random_concept in randoms:
+                accuracies.append(self._calculate_cav(concept, random_concept, bottleneck, bottleneck_model,
+                                                      activations, ow))
         return accuracies
 
-    def cavs(self, min_acc: float = 0., ow: bool = True, in_memory: bool = True, concept_dir: str = '') -> Dict:
+    def cavs(self, min_acc: float = 0., ow: bool = False, in_memory: bool = True, concept_dir: str = '') -> Dict:
         """This method calculates and saves CAVs for all the discovered concepts
         versus all random concepts in all the bottleneck layers.
 
@@ -486,40 +507,42 @@ class ACE:
          {'bottleneck layer':{'concept name':[list of accuracies], ...}, ...}. Also includes the random concept and the
          target_class as 'concept name'.
         """
-        acc = {bottleneck: {} for bottleneck in self.bottlenecks}
+        os.makedirs(self.cav_dir)
+        accuracy = {bottleneck: {} for bottleneck in self.bottlenecks}
         concepts_to_delete = []
         for bottleneck in self.bottlenecks:
             # compute concept activations
-            # prevent tf.function tracing by defining model before outside for loop
+            # prevent tf.function tracing by defining model outside for loop
             bottleneck_model = get_bottleneck_model(self.model, bottleneck)
             for concept in self.concept_dict[bottleneck]['concepts']:
                 if in_memory:
                     concept_imgs = self.concept_dict[bottleneck][concept]['images']
                 else:
-                    filepaths = [os.path.join(concept_dir, img) for img in
-                                 os.listdir(os.path.join(concept_dir, f'{bottleneck}_{concept}'))]
+                    filepaths = [os.path.join(concept_dir, concept, bottleneck, img) for img in
+                                 os.listdir(os.path.join(concept_dir, concept, bottleneck))]
                     concept_imgs = load_images_from_files(filepaths, do_shuffle=False)
+
                 concept_acts = get_activations_of_images(concept_imgs, bottleneck_model)
-                acc[bottleneck][concept] = self._concept_cavs(bottleneck, bottleneck_model, concept, concept_acts,
-                                                              ow=ow)
-                if np.mean(acc[bottleneck][concept]) < min_acc:
+                accuracy[bottleneck][concept] = self._concept_cavs(bottleneck, bottleneck_model, concept, concept_acts,
+                                                                   ow=ow)
+                if np.mean(accuracy[bottleneck][concept]) < min_acc:
                     concepts_to_delete.append((bottleneck, concept))
 
             # compute target_class activations
             target_class_acts = get_activations_of_images(self.discovery_images, bottleneck_model)
-            acc[bottleneck][self.target_class] = self._concept_cavs(bottleneck, bottleneck_model, self.target_class,
-                                                                    target_class_acts, ow=ow)
+            accuracy[bottleneck][self.target_class] = self._concept_cavs(bottleneck, bottleneck_model,
+                                                                         self.target_class, target_class_acts, ow=ow)
             # compute random activations
             rnd_acts = self._random_concept_activations(bottleneck, bottleneck_model, self.random_concept)
-            acc[bottleneck][self.random_concept] = self._concept_cavs(bottleneck, bottleneck_model, self.random_concept,
-                                                                      rnd_acts, ow=ow)
+            accuracy[bottleneck][self.random_concept] = self._concept_cavs(bottleneck, bottleneck_model,
+                                                                           self.random_concept, rnd_acts, ow=ow)
 
         # delete inaccurate concepts
         for bottleneck, concept in concepts_to_delete:
             self.delete_concept(bottleneck, concept)
-        return acc
+        return accuracy
 
-    def delete_concept(self, bottleneck_layer, concept):
+    def delete_concept(self, bottleneck_layer: str, concept: str):
         """Removes a discovered concepts if it's not already removed.
 
         @param bottleneck_layer: Bottleneck layer where the concepts are discovered.
@@ -530,7 +553,7 @@ class ACE:
             self.concept_dict[bottleneck_layer]['concepts'].\
                 pop(self.concept_dict[bottleneck_layer]['concepts'].index(concept))
 
-    def _return_gradients(self, images):
+    def _return_gradients(self, images: np.ndarray) -> Dict:
         """For the given images calculates the gradient tensors. Represents the first term of the directional derivative
         in the TCAV paper. Kim, B., Wattenberg, M., Gilmer, J., Cai, C., Wexler, J., Viegas, F.,; Sayres, R. (2018).
         Interpretability beyond feature attribution: Quantitative Testing with Concept Activation Vectors (TCAV).
@@ -539,7 +562,6 @@ class ACE:
         @param images: Array of images for which we want to calculate the gradients.
         @return A dictionary of the gradients per bottleneck. {bottleneck:gradients, ...:...}.
         """
-
         gradients = {}
         class_id = self.class_to_id[self.target_class]
         for bottleneck_layer in self.bottlenecks:
@@ -548,7 +570,7 @@ class ACE:
             gradients[bottleneck_layer] = bottleneck_gradients
         return gradients
 
-    def _tcav_score(self, bottleneck_layer, concept, random_concept, gradients):
+    def _tcav_score(self, bottleneck_layer: str, concept: str, random_concept: str, gradients: Dict) -> float:
         """Calculates and returns the TCAV score of a concept.
 
         @param bottleneck_layer: Name of the bottleneck layer on which the TCAV score will be calculated.
@@ -561,7 +583,7 @@ class ACE:
         directional_derivative = np.sum(gradients[bottleneck_layer] * cav.cav, -1)
         return np.mean(directional_derivative > 0)
 
-    def tcavs(self, test: bool = False, sort: bool = True, tcav_score_images=None):
+    def tcavs(self, test: bool = False, sort: bool = True, tcav_score_images=None) -> Dict:
         """Calculates TCAV scores for all discovered concepts and sorts concepts. Can also remove Concepts with low
         p-values.
 
@@ -572,7 +594,6 @@ class ACE:
         @return A dictionary of the form {'bottleneck layer':{'concept name': [list of tcav scores], ...}, ...}
         containing TCAV scores.
         """
-
         tcav_scores = {bn: {} for bn in self.bottlenecks}
         randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]
         if tcav_score_images is None:  # Load target class images if not given
@@ -626,7 +647,8 @@ class ACE:
                 concepts.append(self.concept_dict[bottleneck]['concepts'][idx])
             self.concept_dict[bottleneck]['concepts'] = concepts
 
-    def _project_onto_concept(self, bottleneck: str, activations: np.ndarray, concept: str, randoms: List):
+    def _project_onto_concept(self, bottleneck: str, activations: np.ndarray, concept: str,
+                              randoms: List) -> np.ndarray:
         """Transforms data points from activations space to concept space. The projection is normalized
         by the squared L-2 norm of the corresponding CAV
 
@@ -651,7 +673,7 @@ class ACE:
             concept_projection = [t_func(rnd) for rnd in randoms]
         return np.stack(concept_projection, axis=-1)
 
-    def project_onto_concept_space(self, bottleneck: str, images: np.ndarray, mean: bool = True):
+    def project_onto_concept_space(self, bottleneck: str, images: np.ndarray, mean: bool = True) -> np.ndarray:
         """Transforms images from pixel space to (L-2 squared normalized) concept space.
 
         @param bottleneck: Name of the bottleneck layer.
@@ -669,4 +691,37 @@ class ACE:
             concept_space[:, i, :] = self._project_onto_concept(bottleneck, img_activations, concept, randoms)
         if mean:
             concept_space = np.mean(concept_space, -1)
-        return concept_space
+        return concept_space  # TODO change to accommodate changed concepts from multiple to just one
+
+    def save_cavs(self, accuracies, mode='max'):
+        randoms = ['random500_{}'.format(i) for i in range(self.num_random_concepts)]
+        if mode == 'max':  # take maximum accuracy cav
+            for bn in accuracies.keys():
+                bn_dic = accuracies[bn]
+                for concept in bn_dic:
+                    max_random_concept = randoms[np.argmax(bn_dic[concept])]
+                    filename = os.path.join(self.cav_dir, f'{bn}-{concept}-{max_random_concept}.pkl')
+                    cav = CAV.load_cav(filename)
+                    cav.file_name = f'{cav.bottleneck}-{cav.concept}.pkl'
+                    cav.save_cav(os.path.join(self.working_dir, 'cavs'))
+
+        elif mode == 'average':
+            for bn in accuracies.keys():
+                bn_dic = accuracies[bn]
+
+                def aggregate(random):
+                    filename = os.path.join(self.cav_dir, f'{bn}-{concept}-{random}.pkl')
+                    cav = CAV.load_cav(filename)
+                    return cav.cav
+
+                for concept in bn_dic:
+                    if self.num_workers:
+                        pool = multiprocessing.Pool(self.num_workers)
+                        cavs = pool.map(lambda rnd: aggregate(rnd), randoms)
+                    else:
+                        cavs = [aggregate(random) for random in randoms]
+                    cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bn}-{concept}-random500_0.pkl'))
+                    cav.cav = np.mean(np.array(cavs), axis=0)
+                    cav.file_name = f'{cav.bottleneck}-{cav.concept}.pkl'
+                    cav.save_cav(os.path.join(self.working_dir, 'cavs'))
+        shutil.rmtree(self.cav_dir)
