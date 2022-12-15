@@ -33,9 +33,10 @@ class CAV:
         return cav
 
     def __init__(self, bottleneck: str, concept: str, random_counterpart: str):
-        self.bottleneck = bottleneck
         self.concept = concept
         self.random_counterpart = random_counterpart
+        self.bottleneck = bottleneck
+        self.class_id = None
         self.cav = None
         self.intercept = None
         self.norm = None
@@ -79,6 +80,10 @@ class CAV:
         self.cav = svm.coef_[0].reshape(1, -1)  # TODO maybe -1, 1 is nicer
         self.intercept = svm.intercept_[0]
         self.norm = np.linalg.norm(self.cav, ord=2)
+
+    def compute_tcav_score(self, gradients):
+        directional_derivative = np.sum(gradients * self.cav, -1)
+        return np.mean(directional_derivative > 0)
 
 
 def get_or_train_cav(concepts: List, bottleneck: str,  cav_dir: str, act_dct: Dict,

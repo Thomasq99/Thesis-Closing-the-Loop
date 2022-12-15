@@ -360,7 +360,7 @@ def save_ace_report(cd, accuracies, scores, address):
         f.write(report)
 
 
-def plot_concepts(cd, bottleneck, target_class, num=10, address=None, mode='diverse', concepts=None):
+def plot_concepts_matplotlib(cd, bottleneck, target_class, num=10, address=None, mode='diverse', concepts=None):
     """Plots examples of discovered concepts.
 
     @param cd: The concept discovery instance.

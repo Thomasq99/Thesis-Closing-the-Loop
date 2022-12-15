@@ -21,11 +21,8 @@ import tensorflow as tf
 import sklearn.cluster as cluster
 from sklearn.metrics.pairwise import euclidean_distances
 import os
-from .ACE_helper import load_images_from_files, get_activations_of_images, get_gradients_of_images, \
-    get_grad_model, get_bottleneck_model, do_statistical_testings
+from .helper import load_images_from_files, get_activations_of_images, get_bottleneck_model
 from .CAV import CAV, get_or_train_cav
-
-# TODO fix multiprocessing error when no of workers is high
 
 
 class ACE:
@@ -43,13 +40,13 @@ class ACE:
         Finally, using CAV and TCAVs these concepts are created and the corresponding TCAV scores are computed.
     """
     # TODO add work for grey scale images
-    def __init__(self, model: tf.keras.Model, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
+    def __init__(self, model_name: str, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
                  random_concept: str, class_to_id: Dict,
                  average_image_value: int = 117, num_workers: int = 0, channel_mean: bool = True, max_imgs: int = 40,
                  min_imgs: int = 20, num_random_concepts: int = 20, num_discovery_imgs=40) -> None:
         """Runs concept discovery algorithm. For more information see ACE docstring.
 
-        @param model: A trained tensorflow model for which the concepts need to be discovered.
+        @param model_name: Path to the tf.keras.Model or InceptionV3
         @param bottlenecks: A list of bottleneck layers for which ACE is performed.
         @param target_class: Name of the class for which the concepts need to be discovered.
         @param source_dir: Directory that contains folders of the images classes.
@@ -64,7 +61,13 @@ class ACE:
         @param min_imgs: minimum number of patches in a discovered concept for the concept to be accepted.
         @param num_discovery_imgs: Number of images used for concept discovery. If None, will use max_imgs instead.
         """
-        self.model = model
+        self.model_name = model_name
+        if model_name == 'InceptionV3':
+            self.model = tf.keras.applications.inception_v3.InceptionV3()
+        elif os.path.exists(self.model_name):
+            self.model = tf.keras.models.load_model(self.model_name)
+        else:
+            raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
         self.bottlenecks = bottlenecks
         self.target_class = target_class
         self.working_dir = working_dir
@@ -72,7 +75,7 @@ class ACE:
         self.random_concept = random_concept
         self.class_to_id = class_to_id
         self.average_image_value = average_image_value  # 117 is default zero value for Inception V3
-        self.image_shape = model.input.shape[1:3][::-1]  # retrieve image shape from the model as (width, height)
+        self.image_shape = self.model.input.shape[1:3][::-1]  # retrieve image shape from the model as (width, height)
         self.num_workers = num_workers
         self.channel_mean = channel_mean
         self.max_imgs = max_imgs
@@ -89,9 +92,6 @@ class ACE:
         self.activation_dir = os.path.join(working_dir, 'acts/')
         self.cav_dir = os.path.join(working_dir, 'cavs_temp/')
         self.discovered_concepts_dir = os.path.join(working_dir, 'concepts/')
-
-    def __repr__(self):
-        return f'ACE({self.model}, {self.bottlenecks}, {self.target_class})'
 
     def load_concept_imgs(self, concept: str, max_imgs: int = 1000):
         """Loads all colored images of a concept or class. Rescales the images to self.image_shape if needed.
@@ -553,100 +553,6 @@ class ACE:
             self.concept_dict[bottleneck_layer]['concepts'].\
                 pop(self.concept_dict[bottleneck_layer]['concepts'].index(concept))
 
-    def _return_gradients(self, images: np.ndarray) -> Dict:
-        """For the given images calculates the gradient tensors. Represents the first term of the directional derivative
-        in the TCAV paper. Kim, B., Wattenberg, M., Gilmer, J., Cai, C., Wexler, J., Viegas, F.,; Sayres, R. (2018).
-        Interpretability beyond feature attribution: Quantitative Testing with Concept Activation Vectors (TCAV).
-        35th International Conference on Machine Learning, ICML 2018, 6, 4186–4195.
-
-        @param images: Array of images for which we want to calculate the gradients.
-        @return A dictionary of the gradients per bottleneck. {bottleneck:gradients, ...:...}.
-        """
-        gradients = {}
-        class_id = self.class_to_id[self.target_class]
-        for bottleneck_layer in self.bottlenecks:
-            bottleneck_gradients = get_gradients_of_images(images, get_grad_model(self.model, bottleneck_layer),
-                                                           class_id)
-            gradients[bottleneck_layer] = bottleneck_gradients
-        return gradients
-
-    def _tcav_score(self, bottleneck_layer: str, concept: str, random_concept: str, gradients: Dict) -> float:
-        """Calculates and returns the TCAV score of a concept.
-
-        @param bottleneck_layer: Name of the bottleneck layer on which the TCAV score will be calculated.
-        @param concept: Name of the concept of which the TCAV score will be calculated.
-        @param random_concept: Name of the random concept on which the concept will be compared to.
-        @param gradients: Dict of gradients of tcav_score_images.
-        @return TCAV score of the concept w.r.t. the given random concept.
-        """
-        cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bottleneck_layer}-{concept}-{random_concept}.pkl'))
-        directional_derivative = np.sum(gradients[bottleneck_layer] * cav.cav, -1)
-        return np.mean(directional_derivative > 0)
-
-    def tcavs(self, test: bool = False, sort: bool = True, tcav_score_images=None) -> Dict:
-        """Calculates TCAV scores for all discovered concepts and sorts concepts. Can also remove Concepts with low
-        p-values.
-
-        @param test: If True, perform statistical testing and removes concepts that do not pass.
-        @param sort: If True, sort the concepts in each bottleneck layer based on average TCAV score of the concepts.
-        @param tcav_score_images: Target class images used for calculating TCAV scores. If None the target class source
-            directory images will be used.
-        @return A dictionary of the form {'bottleneck layer':{'concept name': [list of tcav scores], ...}, ...}
-        containing TCAV scores.
-        """
-        tcav_scores = {bn: {} for bn in self.bottlenecks}
-        randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]
-        if tcav_score_images is None:  # Load target class images if not given
-            raw_imgs = self.load_concept_imgs(self.target_class, 2 * self.max_imgs)
-            tcav_score_images = raw_imgs[-self.max_imgs:]
-        gradients = self._return_gradients(tcav_score_images)
-        for bn in self.bottlenecks:
-            for concept in self.concept_dict[bn]['concepts'] + [self.random_concept]:
-                def t_func(rnd):
-                    return self._tcav_score(bn, concept, rnd, gradients)
-
-                if self.num_workers:
-                    pool = multiprocessing.Pool(self.num_workers)
-                    tcav_scores[bn][concept] = pool.map(lambda rnd: t_func(rnd), randoms)
-                else:
-                    tcav_scores[bn][concept] = [t_func(rnd) for rnd in randoms]
-        if test:
-            self.test_and_remove_concepts(tcav_scores)
-        if sort:
-            self._sort_concepts(tcav_scores)
-        return tcav_scores
-
-    def test_and_remove_concepts(self, tcav_scores: Dict):
-        """Using TCAV scores of the discovered concepts versus the random_counterpart
-        concept, performs statistical t-tests and removes concepts that have a p-value larger than 0.01.
-
-        @param tcav_scores: Dictionary containing the tcav scores in the form of {bottleneck:concept:[tcav_scores],...}.
-        """
-        concepts_to_delete = []
-        for bottleneck in self.bottlenecks:
-            for concept in self.concept_dict[bottleneck]['concepts']:
-                p_value = do_statistical_testings(tcav_scores[bottleneck][concept],
-                                                  tcav_scores[bottleneck][self.random_concept])
-                if p_value > 0.01:
-                    concepts_to_delete.append((bottleneck, concept))
-        for bottleneck, concept in concepts_to_delete:
-            self.delete_concept(bottleneck, concept)
-
-    def _sort_concepts(self, scores: Dict):
-        """Sort concepts based on average TCAV scores.
-
-        @param scores: Dictionary containing the tcav scores for each concept and bottleneck in the form of:
-        {bottleneck: concept: [tcav_scores],... }.
-        """
-        for bottleneck in self.bottlenecks:
-            tcavs = []
-            for concept in self.concept_dict[bottleneck]['concepts']:
-                tcavs.append(np.mean(scores[bottleneck][concept]))
-            concepts = []
-            for idx in np.argsort(tcavs)[::-1]:
-                concepts.append(self.concept_dict[bottleneck]['concepts'][idx])
-            self.concept_dict[bottleneck]['concepts'] = concepts
-
     def _project_onto_concept(self, bottleneck: str, activations: np.ndarray, concept: str,
                               randoms: List) -> np.ndarray:
         """Transforms data points from activations space to concept space. The projection is normalized
@@ -661,7 +567,7 @@ class ACE:
         @return: The projection of activations of all images on all CAV directions of the given concept.
             Resulting shape is (no_of_imgs, no_of_random_concepts).
         """
-        # CAVs are L-2 normalized #TODO add intercepts, vector operations
+        #TODO add intercepts, vector operations
         def t_func(rnd):
             cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bottleneck}-{concept}-{rnd}.pkl'))
             return ((cav.cav @ activations.T) / cav.norm).reshape(-1)
@@ -693,7 +599,7 @@ class ACE:
             concept_space = np.mean(concept_space, -1)
         return concept_space  # TODO change to accommodate changed concepts from multiple to just one
 
-    def save_cavs(self, accuracies, mode='max'):
+    def aggregate_cavs(self, accuracies, mode='max'):
         randoms = ['random500_{}'.format(i) for i in range(self.num_random_concepts)]
         if mode == 'max':  # take maximum accuracy cav
             for bn in accuracies.keys():
@@ -709,17 +615,17 @@ class ACE:
             for bn in accuracies.keys():
                 bn_dic = accuracies[bn]
 
-                def aggregate(random):
-                    filename = os.path.join(self.cav_dir, f'{bn}-{concept}-{random}.pkl')
-                    cav = CAV.load_cav(filename)
-                    return cav.cav
+                def average(random):
+                    file = os.path.join(self.cav_dir, f'{bn}-{concept}-{random}.pkl')
+                    cav_t = CAV.load_cav(file)
+                    return cav_t.cav
 
                 for concept in bn_dic:
                     if self.num_workers:
                         pool = multiprocessing.Pool(self.num_workers)
-                        cavs = pool.map(lambda rnd: aggregate(rnd), randoms)
+                        cavs = pool.map(lambda rnd: average(rnd), randoms)
                     else:
-                        cavs = [aggregate(random) for random in randoms]
+                        cavs = [average(random) for random in randoms]
                     cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bn}-{concept}-random500_0.pkl'))
                     cav.cav = np.mean(np.array(cavs), axis=0)
                     cav.file_name = f'{cav.bottleneck}-{cav.concept}.pkl'

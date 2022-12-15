@@ -1,18 +1,13 @@
-import shutil
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
-from Concepts.ACE_helper import save_images, save_concepts, load_images_from_files
-from Dash_helper import prepare_ACE
+from Dash_helper import run_ACE
 import os
-import numpy as np
 import diskcache
 import plotly.graph_objects as go
-import pickle as p
-import tensorflow as tf
 from Concepts.ConceptBank import ConceptBank
-
+import time
 
 # TODO add support for numpy array
 
@@ -69,7 +64,7 @@ ace_inputs = [
 
 app.layout = dbc.Container(children=
 [
-    dcc.Store(id='ace'),
+    dcc.Store(id='concept_bank'),
 
     html.H1(children='Creating the Concepts', style={'textAlign': 'center'}),
 
@@ -87,10 +82,11 @@ app.layout = dbc.Container(children=
                 dbc.Col([html.H5("ACE initialization parameters"), html.Br()] + ace_inputs +
                         [dbc.Spinner(html.Div(id='ace_output_text'))], width=4),
                 dbc.Col([html.H5('Visualization of Concepts', style={'textAlign': 'center'}),
-                         dcc.Graph(figure=blank_fig(), id='cav_images',
+                         dbc.Spinner(dcc.Graph(figure=blank_fig(), id='cav_images',
                                    style={'overflowY': 'scroll', 'overflowX': 'scroll', 'width': '63vw',
-                                          'height': '75vh'})
-                         ],
+                                         'height': '70vh'})),
+                         dcc.Dropdown(id='bottleneck_dropdown_cav_images', value="Not initialized",
+                                      disabled=True)],
                         width=8)
             ]
         )
@@ -98,7 +94,10 @@ app.layout = dbc.Container(children=
 ])
 
 
-@app.callback([Output('ace_output_text', 'children'), Output('ace', 'data'), Output('cav_images', 'figure')],
+@app.callback([Output('ace_output_text', 'children'), Output('concept_bank', 'data'),
+               Output('bottleneck_dropdown_cav_images', 'disabled'),
+               Output('bottleneck_dropdown_cav_images', 'options'),
+               Output('bottleneck_dropdown_cav_images', 'value')],
               [Input('start_ACE', 'n_clicks'),
               State('model_selection', 'value'),
               State('data_path', 'value'),
@@ -107,72 +106,38 @@ app.layout = dbc.Container(children=
               State('bottlenecks', 'value')],
               running=[(Output('start_ACE', 'disabled'), True, False)],
               background=True,
-              manager=background_callback_manager
-              )
+              manager=background_callback_manager)
 def start_ace(n_clicks, model_name, path_to_source, path_to_working_dir, target_class, bottlenecks):
     if n_clicks is None:  # prevent from initializing on start
         raise dash.exceptions.PreventUpdate("Button has not been clicked yet")
     else:
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        mode = 'max'
-        overwrite = False
-        discovered_concepts_dir, ace = prepare_ACE(model_name, path_to_source, path_to_working_dir, target_class,
-                                                   bottlenecks, overwrite=overwrite)
-        # find if patches are already created once
-        image_dir = os.path.join(discovered_concepts_dir, target_class, 'images')
-        concept_bank_dct = {bn: ConceptBank(bn, working_dir=path_to_working_dir) for bn in bottlenecks}
+        concept_bank_dct = run_ACE(model_name, path_to_source, path_to_working_dir, target_class, bottlenecks)
 
-        # check which bottlenecks are not yet created
-        bn_to_find_concepts_for = [bn for bn in bottlenecks if not os.listdir(
-            os.path.join(discovered_concepts_dir, target_class, bn))]
-        bn_precomputed_concepts = list(set(bottlenecks) - set(bn_to_find_concepts_for))
+        # sort concept banks:
+        print('sorting concept bank')
+        for bottleneck in concept_bank_dct:
+            concept_bank_dct[bottleneck].sort_concepts()
 
-        if bn_precomputed_concepts:
-            for bn in bn_precomputed_concepts:
-                print(f'loading in concepts for {bn}')
-                concepts = os.listdir(os.path.join(discovered_concepts_dir, target_class, bn))
-                concepts = [concept for concept in concepts if not concept.endswith('patches')]
-                concept_bank_dct[bn] = ConceptBank(bn, path_to_working_dir, concepts)
-
-        if bn_to_find_concepts_for:  # if not empty discover concepts for bottlenecks
-            print(f'discovering concepts for {bn_to_find_concepts_for}')
-            print('Creating patches')
-            ace.bottlenecks = bn_to_find_concepts_for
-            if os.path.exists(image_dir):
-                ace.create_patches_for_data(discovery_images=load_images_from_files(
-                    [os.path.join(image_dir, file) for file in os.listdir(image_dir)]))
-            else:
-                os.makedirs(image_dir)
-                ace.create_patches_for_data()
-                save_images(image_dir,
-                            (ace.discovery_images * 255).astype(np.uint8))  # save images used for creating patches
-
-            print('Discover concepts')
-            ace.discover_concepts(method='KM', param_dicts={'n_clusters': 25})
-            del ace.dataset  # Free memory
-            del ace.image_numbers
-            del ace.patches
-
-            # Save discovered concept images (resized and original sized)
-            save_concepts(ace, os.path.join(discovered_concepts_dir, target_class))
-
-            print('Calculating CAVs')
-            accuracies = ace.cavs(in_memory=True, ow=overwrite)
-
-            print('combining CAVs')
-            ace.save_cavs(accuracies, mode=mode)
-
-            concept_dict = {bn: ace.concept_dict[bn]['concepts'] for bn in ace.concept_dict.keys()}
-
-            for bn in concept_dict.keys():
-                concept_bank_dct[bn] = ConceptBank(bn, path_to_working_dir, concept_dict[bn])
-
-        del ace
-        print('plotting')
-        #TODO add selection of bn
-        fig = concept_bank_dct[bottlenecks[0]].plot_concepts(num_images=10)
         concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in concept_bank_dct.keys()}
-    return 'Done', concept_bank_dct, fig
+    # TODO allow for loading existing concept_bank and adding concepts to it.
+    return 'Done', concept_bank_dct, False, bottlenecks, bottlenecks[0]
+
+
+@app.callback(Output('cav_images', 'figure'),
+              [Input('bottleneck_dropdown_cav_images', 'value'),
+               State('concept_bank', 'data')],
+              running=[(Output('bottleneck_dropdown_cav_images', 'disabled'), True, False)])
+def create_figure(bottleneck, concept_bank_dct):
+    if bottleneck == 'Not initialized':
+        raise dash.exceptions.PreventUpdate("ACE has not been run yet")
+    else:
+        concept_bank = ConceptBank(concept_bank_dct[bottleneck])
+        concept_bank.load_in_memory()
+        fig = concept_bank.plot_concepts(num_images=10)
+        fig.show()
+        print('returning figure')
+    return fig
 
 
 if __name__ == '__main__':
