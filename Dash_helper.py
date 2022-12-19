@@ -93,7 +93,7 @@ def run_ACE(model_name, path_to_source, path_to_working_dir, target_class, bottl
             concepts = [concept for concept in concepts if not concept.endswith('patches')]
             concept_bank_dct[bn] = ConceptBank(dict(bottleneck=bn, working_dir=path_to_working_dir,
                                                     concept_names=concepts, class_id_dct=ace.class_to_id,
-                                                    model_name=ace.model_name))
+                                                    model_name=model_name))
 
     #######################################################################
     ################### Find new concepts #################################

@@ -36,7 +36,6 @@ class CAV:
         self.concept = concept
         self.random_counterpart = random_counterpart
         self.bottleneck = bottleneck
-        self.class_id = None
         self.cav = None
         self.intercept = None
         self.norm = None
@@ -52,8 +51,8 @@ class CAV:
                    'random_counterpart': self.random_counterpart, 'cav': self.cav, 'intercept': self.intercept,
                    'norm': self.norm, 'accuracy': self.accuracy}
 
-        file_path = os.path.join(cav_dir,
-                                 self.file_name)
+        file_path = os.path.join(cav_dir, self.file_name)
+
         with open(file_path, 'wb') as file:
             p.dump(cav_dct, file, protocol=-1)
 
@@ -81,7 +80,12 @@ class CAV:
         self.intercept = svm.intercept_[0]
         self.norm = np.linalg.norm(self.cav, ord=2)
 
-    def compute_tcav_score(self, gradients):
+    def compute_tcav_score(self, gradients: np.ndarray):
+        """Computes the TCAV score of the cav w.r.t. the gradients of images of the bottleneck layer.
+
+        @param gradients: Array containing the gradients of images w.r.t. the bottleneck layer of a model.
+        @return: The TCAV score of the CAV w.r.t the gradients.
+        """
         directional_derivative = np.sum(gradients * self.cav, -1)
         return np.mean(directional_derivative > 0)
 

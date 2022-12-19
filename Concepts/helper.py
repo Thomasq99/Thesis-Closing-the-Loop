@@ -313,7 +313,6 @@ def save_concepts(cd, concepts_dir):
     """
     for bn in cd.bottlenecks:
         concepts_dir_bn = os.path.join(concepts_dir, bn)
-        #os.makedirs(concepts_dir_bn)
         for concept in cd.concept_dict[bn]['concepts']:
             patches_dir = os.path.join(concepts_dir_bn, concept + '_patches')
             images_dir = os.path.join(concepts_dir_bn, concept)

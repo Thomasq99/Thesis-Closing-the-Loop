@@ -6,7 +6,6 @@ from plotly.subplots import make_subplots
 from skimage.segmentation import mark_boundaries
 import numpy as np
 import plotly.graph_objects as go
-from PIL import Image
 from typing import Dict
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -28,8 +27,13 @@ class ConceptBank:
     def add_concept(self, concepts: List):
         self.concept_names.extend(concepts)
 
-    def remove_concept(self, concept):
-        pass
+    def remove_concept(self, concept_name):
+        remove_idx = self.concept_names.index(concept_name)
+        del self.concept_names[remove_idx]
+        if self.in_memory:
+            del self.concepts[remove_idx]
+            if self.tcav_scores:
+                del self.tcav_scores[remove_idx]
 
     def rename_concept(self, old_name, new_name):
         pass
@@ -72,6 +76,8 @@ class ConceptBank:
             discovery_images_of_class = discovery_images[concept_class]
             gradients = get_gradients_of_images(discovery_images_of_class, get_grad_model(model, self.bottleneck),
                                                 class_id)
+
+            # compute tcav scores
             self.tcav_scores = [concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class]
 
         if not self.in_memory:
@@ -90,7 +96,7 @@ class ConceptBank:
         else:
             print('Already in memory.')
 
-    def load_concept_imgs(self, num_images=10):
+    def load_concept_imgs(self, num_images, shape):
         concept_dir = os.path.join(self.working_dir, 'concepts')
         concepts_dict = {'concepts': self.concept_names}
 
@@ -103,11 +109,11 @@ class ConceptBank:
 
             images, filenames = load_images_from_files(filenames=[os.path.join(images_locs[i], file)
                                                                   for file in os.listdir(images_locs[i])[:num_images]],
-                                                       return_filenames=True, do_shuffle=False)
+                                                       return_filenames=True, do_shuffle=False, shape=shape)
 
             patches = load_images_from_files(filenames=[os.path.join(patches_locs[i], file)
                                                         for file in os.listdir(patches_locs[i])[:num_images]],
-                                             do_shuffle=False)
+                                             do_shuffle=False, shape=shape)
 
             image_numbers = [int(filename.split('_')[-1].split('.')[0]) for filename in filenames]
             concepts_dict[self.concept_names[i]] = {'images': images, 'patches': patches,
@@ -115,13 +121,12 @@ class ConceptBank:
 
         return concepts_dict
 
-    def plot_concepts(self, num_images=10):
+    def plot_concepts(self, num_images=10, shape=(60,60)):
         if not self.in_memory:
             self.load_in_memory()
             self.in_memory = False
 
-
-        concepts_dct = self.load_concept_imgs(num_images)
+        concepts_dct = self.load_concept_imgs(num_images, shape)
         n_rows = 2 * len(self.concept_names)
 
         # create subplot titles
@@ -144,7 +149,7 @@ class ConceptBank:
         current_class = self.concept_names[0].split('_')[0]
         image_dir = os.path.join(self.working_dir, 'concepts', current_class, 'images')
         discovery_images = load_images_from_files([os.path.join(image_dir, file) for file in os.listdir(image_dir)],
-                                                  do_shuffle=False)
+                                                  shape=shape, do_shuffle=False)
 
         for concept in self.concept_names:
             # TODO add support for different modes
@@ -153,13 +158,12 @@ class ConceptBank:
             concept_image_numbers = concepts_dct[concept]['image_numbers']
             idxs = np.arange(len(concept_images))[:num_images]
             for i, idx in enumerate(idxs):
-                img = Image.fromarray(np.uint8(concept_images[idx] * 255)).resize((60, 60))  # reduce image size
-                mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255, -1) == 1)  # hard coded 117, default avg for inception
-                image = discovery_images[concept_image_numbers[idx]]
-                image = Image.fromarray(np.uint8(mark_boundaries(image, mask, color=(1, 1, 0),
-                                                                 mode='thick') * 255)).resize((60, 60))
-                fig.add_trace(go.Image(z=img), j, i+1)
-                fig.add_trace(go.Image(z=image), j + 1, i+1)
+                image = np.uint8(concept_images[idx]*255)
+                mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255, -1) == 1)  # 117, default avg for inception
+                annotated_image = discovery_images[concept_image_numbers[idx]]
+                annotated_image = np.uint8(mark_boundaries(annotated_image, mask, color=(1, 1, 0), mode='thick')*255)
+                fig.add_trace(go.Image(z=image, hoverinfo='none'), j, i+1)
+                fig.add_trace(go.Image(z=annotated_image, hoverinfo='none'), j + 1, i+1)
             j += 2
 
             if concept.split('_')[0] != current_class:
@@ -181,8 +185,12 @@ class ConceptBank:
             self.concepts = None
         return fig
 
-    def plot_concepts_plt(self, num_images):
-        concepts_dct = self.load_concept_imgs(num_images)
+    def plot_concepts_plt(self, num_images, shape=(60, 60)):
+        if not self.in_memory:
+            self.load_in_memory()
+            self.in_memory = False
+
+        concepts_dct = self.load_concept_imgs(num_images, shape)
         num_concepts = len(self.concept_names)
         plt.rcParams['figure.figsize'] = num_images * 2.1, 4.3 * num_concepts
         fig = plt.figure(figsize=(num_images * 2, 4 * num_concepts))
@@ -191,7 +199,7 @@ class ConceptBank:
         current_class = self.concept_names[0].split('_')[0]
         image_dir = os.path.join(self.working_dir, 'concepts', current_class, 'images')
         discovery_images = load_images_from_files([os.path.join(image_dir, file) for file in os.listdir(image_dir)],
-                                                  do_shuffle=False)
+                                                  do_shuffle=False, shape=shape)
 
         for n, concept in enumerate(self.concept_names):
             inner = gridspec.GridSpecFromSubplotSpec(2, num_images, subplot_spec=outer[n], wspace=0, hspace=0.1)
@@ -202,7 +210,7 @@ class ConceptBank:
             for i, idx in enumerate(idxs):
                 ax = plt.Subplot(fig, inner[i])
 
-                img = np.array(Image.fromarray(np.uint8(concept_images[idx] * 255)).resize((60, 60)))  # reduce img size
+                img = np.uint8(concept_images[idx] * 255)# reduce img size
                 ax.imshow(img)
                 ax.set_xticks([])
                 ax.set_yticks([])
@@ -214,8 +222,7 @@ class ConceptBank:
                 mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255,
                                     -1) == 1)  # hard coded 117, default avg for inception
                 image = discovery_images[concept_image_numbers[idx]]
-                image = np.array(Image.fromarray(np.uint8(mark_boundaries(image, mask, color=(1, 1, 0),
-                                                                          mode='thick') * 255)).resize((60, 60)))
+                image = np.uint8(mark_boundaries(image, mask, color=(1, 1, 0), mode='thick') * 255)
                 ax.imshow(image)
                 ax.set_xticks([])
                 ax.set_yticks([])
@@ -223,4 +230,7 @@ class ConceptBank:
                 ax.grid(False)
                 fig.add_subplot(ax)
         plt.suptitle(self.bottleneck)
+
+        if not self.in_memory:
+            self.concepts = None
         return fig
