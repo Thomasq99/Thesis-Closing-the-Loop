@@ -1,5 +1,5 @@
 from Concepts.CAV import CAV
-from Concepts.helper import load_images_from_files
+from Concepts.helper import load_images_from_files, get_gradients_of_images, get_grad_model
 import os
 from typing import List
 from plotly.subplots import make_subplots
@@ -10,7 +10,6 @@ from typing import Dict
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from .helper import get_gradients_of_images, get_grad_model
 
 
 class ConceptBank:
@@ -25,7 +24,11 @@ class ConceptBank:
         self.concepts = concept_dct.get('tcav_scores', None)
 
     def add_concept(self, concepts: List):
-        self.concept_names.extend(concepts)
+        if self.in_memory:
+            # TODO implement
+            raise ValueError('Not implemented when CAVs are in memory')
+        else:
+            self.concept_names.extend(concepts)
 
     def remove_concept(self, concept_name):
         remove_idx = self.concept_names.index(concept_name)
@@ -39,7 +42,7 @@ class ConceptBank:
         pass
 
     def sort_concepts(self, discovery_images=None):
-        if self.tcav_scores is None:
+        if (self.tcav_scores is None) or (len(self.tcav_scores)) != (len(self.concept_names)):
             self.compute_tcav_scores(discovery_images=discovery_images)
 
         sorted_idxs = np.argsort(self.tcav_scores)[::-1]
@@ -49,7 +52,9 @@ class ConceptBank:
             self.concepts = list(np.array(self.concepts)[sorted_idxs])
 
     def compute_tcav_scores(self, discovery_images=None):
-        concept_classes = np.array([concept.split('_')[0] for concept in self.concept_names])
+        concept_names_ACE = [concept for concept in self.concept_names if 'userDefined' not in concept]
+        concept_names_user_defined = [concept for concept in self.concept_names if 'userDefined' in concept]
+        concept_classes = np.array([concept.split('_')[0] for concept in concept_names_ACE])
         if discovery_images is None:
             discovery_images = {}
             for concept in set(concept_classes):
@@ -69,16 +74,22 @@ class ConceptBank:
         else:
             raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
 
+        tcav_scores = []
+        concepts_ACE = [self.concepts[i] for i in range(len(self.concepts)) if 'userDefined'
+                        not in self.concept_names[i]]
         for concept_class in set(concept_classes):
             # get gradients
             class_id = self.class_id_dct[concept_class]
-            concepts_of_concept_class = np.array(self.concepts)[concept_classes == concept_class]
+            concepts_of_concept_class = np.array(concepts_ACE)[concept_classes == concept_class]
             discovery_images_of_class = discovery_images[concept_class]
             gradients = get_gradients_of_images(discovery_images_of_class, get_grad_model(model, self.bottleneck),
                                                 class_id)
 
             # compute tcav scores
-            self.tcav_scores = [concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class]
+            tcav_scores.extend([concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class])
+
+        tcav_scores.extend([float('-inf') for concept in concept_names_user_defined])
+        self.tcav_scores = tcav_scores
 
         if not self.in_memory:
             self.concepts = None
@@ -96,16 +107,16 @@ class ConceptBank:
         else:
             print('Already in memory.')
 
-    def load_concept_imgs(self, num_images, shape):
+    def load_concept_imgs_ace(self, concept_names, num_images, shape):
         concept_dir = os.path.join(self.working_dir, 'concepts')
-        concepts_dict = {'concepts': self.concept_names}
+        concepts_dict = {'concepts': concept_names}
 
         images_locs = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept)
-                       for concept in self.concept_names]
+                       for concept in concept_names]
         patches_locs = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept + '_patches')
-                        for concept in self.concept_names]
+                        for concept in concept_names]
 
-        for i in range(len(self.concept_names)):
+        for i in range(len(concept_names)):
 
             images, filenames = load_images_from_files(filenames=[os.path.join(images_locs[i], file)
                                                                   for file in os.listdir(images_locs[i])[:num_images]],
@@ -116,62 +127,98 @@ class ConceptBank:
                                              do_shuffle=False, shape=shape)
 
             image_numbers = [int(filename.split('_')[-1].split('.')[0]) for filename in filenames]
-            concepts_dict[self.concept_names[i]] = {'images': images, 'patches': patches,
-                                                    'image_numbers': image_numbers}
+            concepts_dict[concept_names[i]] = {'images': images, 'patches': patches, 'image_numbers': image_numbers}
 
         return concepts_dict
 
-    def plot_concepts(self, num_images=10, shape=(60,60)):
+    def load_concept_imgs_userDefined(self, concept_names, num_images, shape):
+        concept_dir = os.path.join(self.working_dir, 'concepts')
+        concepts_dict = {'concepts': concept_names}
+        images_locs = [os.path.join(concept_dir, concept, 'images')
+                       for concept in concept_names]
+
+        for i in range(len(concept_names)):
+            images = load_images_from_files(filenames=[os.path.join(images_locs[i], file)
+                                                       for file in os.listdir(images_locs[i])[:num_images]],
+                                            do_shuffle=False, shape=shape)
+            concepts_dict[concept_names[i]] = images
+        return concepts_dict
+
+    def plot_concepts(self, num_images=10, shape=(60, 60)):
         if not self.in_memory:
             self.load_in_memory()
             self.in_memory = False
 
-        concepts_dct = self.load_concept_imgs(num_images, shape)
-        n_rows = 2 * len(self.concept_names)
+        concept_names_ACE = [concept for concept in self.concept_names if 'userDefined' not in concept]
+        concept_names_user_defined = [concept for concept in self.concept_names if 'userDefined' in concept]
+
+        concepts_dct_ACE = self.load_concept_imgs_ace(concept_names_ACE, num_images, shape)
+        concepts_dct_user_defined = self.load_concept_imgs_userDefined(concept_names_user_defined, num_images, shape)
+
+        n_rows = (2 * len(concept_names_ACE)) + len(concept_names_user_defined)
 
         # create subplot titles
         subplot_titles = []
-        for idx, concept in enumerate(self.concept_names):
-            middle = num_images // 2
+        middle = num_images // 2
+        idx = -1 # ensure that idx_user_defined gets the first user_defined tcav_score
+        for idx, concept in enumerate(concept_names_ACE):
             title = ['']*2*num_images
             if self.tcav_scores is not None:
                 subtitle = f'{concept}: TCAV Score of {self.tcav_scores[idx]}, CAV accuracy of ' \
                            f'{self.concepts[idx].accuracy}'
             else:
-                subtitle = f'{concept}: CAV accuracy of {self.concepts[idx]}'
+                subtitle = f'{concept}: CAV accuracy of {self.concepts[idx].accuracy}'
             title[middle] = subtitle
             subplot_titles.extend(title)
 
-        fig = make_subplots(n_rows, num_images, horizontal_spacing=0.01, vertical_spacing=0.01, shared_xaxes=True,
-                            shared_yaxes=True, subplot_titles=subplot_titles)
+        for idx_user_defined, concept in enumerate(concept_names_user_defined):
+            title = ['']*num_images
+            if self.tcav_scores is not None:
+                subtitle = f'{concept}: TCAV Score of {self.tcav_scores[idx + idx_user_defined + 1]}, CAV accuracy of '\
+                           f'{self.concepts[idx + idx_user_defined + 1].accuracy}'
+            else:
+                subtitle = f'{concept}: CAV accuracy of {self.concepts[idx + idx_user_defined + 1].accuracy}'
+            title[middle] = subtitle
+            subplot_titles.extend(title)
+
+        fig = make_subplots(n_rows, num_images, horizontal_spacing=0.1/num_images, vertical_spacing=0.3/n_rows,
+                            shared_xaxes=True, shared_yaxes=True, subplot_titles=subplot_titles)
 
         j = 1
-        current_class = self.concept_names[0].split('_')[0]
-        image_dir = os.path.join(self.working_dir, 'concepts', current_class, 'images')
-        discovery_images = load_images_from_files([os.path.join(image_dir, file) for file in os.listdir(image_dir)],
-                                                  shape=shape, do_shuffle=False)
+        discovery_images_dct = {}
+        for class_ in {name.split('_')[0] for name in concept_names_ACE}:
+            image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
+            discovery_images_dct[class_] = load_images_from_files([os.path.join(image_dir, file)
+                                                                   for file in os.listdir(image_dir)],
+                                                                  shape=shape, do_shuffle=False)
+        if concept_names_ACE:
+            current_class = concept_names_ACE[0].split('_')[0]
+            discovery_images = discovery_images_dct[current_class]
+            for concept in concept_names_ACE:
+                if concept.split('_')[0] != current_class:
+                    current_class = concept.split('_')[0]
+                    discovery_images = discovery_images_dct[current_class]
+                # TODO add support for different modes
+                concept_images = concepts_dct_ACE[concept]['images']
+                concept_patches = concepts_dct_ACE[concept]['patches']
+                concept_image_numbers = concepts_dct_ACE[concept]['image_numbers']
+                idxs = np.arange(len(concept_images))[:num_images]
+                for i, idx in enumerate(idxs):
+                    image = np.uint8(concept_images[idx]*255)
+                    mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255, -1) == 1)  # 117, default avg for inception
+                    annotated_image = discovery_images[concept_image_numbers[idx]]
+                    annotated_image = np.uint8(mark_boundaries(annotated_image, mask, color=(1, 1, 0), mode='thick')*255)
+                    fig.add_trace(go.Image(z=image, hoverinfo='none'), j, i+1)
+                    fig.add_trace(go.Image(z=annotated_image, hoverinfo='none'), j + 1, i+1)
+                j += 2
 
-        for concept in self.concept_names:
-            # TODO add support for different modes
-            concept_images = concepts_dct[concept]['images']
-            concept_patches = concepts_dct[concept]['patches']
-            concept_image_numbers = concepts_dct[concept]['image_numbers']
+        for concept in concept_names_user_defined:
+            concept_images = concepts_dct_user_defined[concept]
             idxs = np.arange(len(concept_images))[:num_images]
             for i, idx in enumerate(idxs):
                 image = np.uint8(concept_images[idx]*255)
-                mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255, -1) == 1)  # 117, default avg for inception
-                annotated_image = discovery_images[concept_image_numbers[idx]]
-                annotated_image = np.uint8(mark_boundaries(annotated_image, mask, color=(1, 1, 0), mode='thick')*255)
-                fig.add_trace(go.Image(z=image, hoverinfo='none'), j, i+1)
-                fig.add_trace(go.Image(z=annotated_image, hoverinfo='none'), j + 1, i+1)
-            j += 2
-
-            if concept.split('_')[0] != current_class:
-                current_class = concept.split('_')[0]
-                image_dir = os.path.join(self.working_dir, 'concepts', current_class, 'images')
-                discovery_images = load_images_from_files(
-                    [os.path.join(image_dir, file) for file in os.listdir(image_dir)],
-                    do_shuffle=False)
+                fig.add_trace(go.Image(z=image, hoverinfo='none'), j, i + 1)
+            j += 1
 
         fig.update_layout(autosize=True,
                           width=9 * 100,
@@ -196,12 +243,19 @@ class ConceptBank:
         fig = plt.figure(figsize=(num_images * 2, 4 * num_concepts))
         outer = gridspec.GridSpec(num_concepts, 1, wspace=0., hspace=0.3)
 
+        discovery_images_dct = {}
+        for class_ in {name.split('_')[0] for name in self.concept_names}:
+            image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
+            discovery_images_dct[class_] = load_images_from_files([os.path.join(image_dir, file)
+                                                                   for file in os.listdir(image_dir)],
+                                                                  shape=shape, do_shuffle=False)
         current_class = self.concept_names[0].split('_')[0]
-        image_dir = os.path.join(self.working_dir, 'concepts', current_class, 'images')
-        discovery_images = load_images_from_files([os.path.join(image_dir, file) for file in os.listdir(image_dir)],
-                                                  do_shuffle=False, shape=shape)
+        discovery_images = discovery_images_dct[current_class]
 
         for n, concept in enumerate(self.concept_names):
+            if concept.split('_')[0] != current_class:
+                current_class = concept.split('_')[0]
+                discovery_images = discovery_images_dct[current_class]
             inner = gridspec.GridSpecFromSubplotSpec(2, num_images, subplot_spec=outer[n], wspace=0, hspace=0.1)
             concept_images = concepts_dct[concept]['images']
             concept_patches = concepts_dct[concept]['patches']
@@ -210,7 +264,7 @@ class ConceptBank:
             for i, idx in enumerate(idxs):
                 ax = plt.Subplot(fig, inner[i])
 
-                img = np.uint8(concept_images[idx] * 255)# reduce img size
+                img = np.uint8(concept_images[idx] * 255)
                 ax.imshow(img)
                 ax.set_xticks([])
                 ax.set_yticks([])

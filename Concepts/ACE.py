@@ -21,8 +21,8 @@ import tensorflow as tf
 import sklearn.cluster as cluster
 from sklearn.metrics.pairwise import euclidean_distances
 import os
-from .helper import load_images_from_files, get_activations_of_images, get_bottleneck_model
-from .CAV import CAV, get_or_train_cav
+from Concepts.helper import load_images_from_files, get_activations_of_images, get_bottleneck_model
+from Concepts.CAV import CAV, get_or_train_cav
 
 
 class ACE:
@@ -41,9 +41,9 @@ class ACE:
     """
     # TODO add work for grey scale images
     def __init__(self, model_name: str, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
-                 random_concept: str, class_to_id: Dict,
-                 average_image_value: int = 117, num_workers: int = 0, channel_mean: bool = True, max_imgs: int = 40,
-                 min_imgs: int = 20, num_random_concepts: int = 20, num_discovery_imgs=40) -> None:
+                 random_concept: str, class_to_id: Dict, average_image_value: int = 117, num_workers: int = 0,
+                 channel_mean: bool = True, max_imgs: int = 40, min_imgs: int = 20, num_random_concepts: int = 20,
+                 num_discovery_imgs=40) -> None:
         """Runs concept discovery algorithm. For more information see ACE docstring.
 
         @param model_name: Path to the tf.keras.Model or InceptionV3
@@ -615,7 +615,7 @@ class ACE:
             for bn in accuracies.keys():
                 bn_dic = accuracies[bn]
 
-                def average(random):
+                def load_cavs(random):
                     file = os.path.join(self.cav_dir, f'{bn}-{concept}-{random}.pkl')
                     cav_t = CAV.load_cav(file)
                     return cav_t.cav
@@ -623,9 +623,9 @@ class ACE:
                 for concept in bn_dic:
                     if self.num_workers:
                         pool = multiprocessing.Pool(self.num_workers)
-                        cavs = pool.map(lambda rnd: average(rnd), randoms)
+                        cavs = pool.map(lambda rnd: load_cavs(rnd), randoms)
                     else:
-                        cavs = [average(random) for random in randoms]
+                        cavs = [load_cavs(random) for random in randoms]
                     cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bn}-{concept}-random500_0.pkl'))
                     cav.cav = np.mean(np.array(cavs), axis=0)
                     cav.file_name = f'{cav.bottleneck}-{cav.concept}.pkl'

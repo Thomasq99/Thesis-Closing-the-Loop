@@ -2,11 +2,16 @@ import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
-from Dash_helper import run_ACE
+from Dash_helper import run_ACE, create_new_concept, update_remove_options, update_bottleneck_options
+from Concepts.helper import ace_create_source_dir_imagenet
 import os
 import diskcache
 import plotly.graph_objects as go
 from Concepts.ConceptBank import ConceptBank
+import tensorflow as tf
+import pickle as p
+import base64
+import io
 
 
 def blank_fig() -> go.Figure:
@@ -37,12 +42,11 @@ concept_bank_menu = [
             dbc.Select(id='remove_concept_select', disabled=True)
         ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
-        dcc.Upload(dbc.Button('Upload Zip File of concept', outline=True, color="primary", style={'width': '100%'})),
+        dcc.Upload(dbc.Button('Upload images to add concept', outline=True, color="primary", style={'width': '100%'}),
+                   multiple=True, id='upload_concept'),
 
-        html.Div(dbc.Button('Import Concept Bank', id='import_button', outline=True, color='primary',
-                            style={'margin-top': '15px', 'margin-bottom': '15px'}),
-                 className="d-grid gap-2"),
-
+        dcc.Upload(dbc.Button('Import Concept Bank', outline=True, color='primary', style={'width': '100%'}),
+                            style={'margin-top': '15px', 'margin-bottom': '15px'}, id='import_cb_button'),
 
         dbc.Row([
             dbc.Col(html.Div(dbc.Button('Clear Concept Bank', outline=True, color='primary', id='clear_concept_bank',
@@ -52,11 +56,7 @@ concept_bank_menu = [
             dbc.Col(html.Div(dbc.Button('Save current Concept Bank', id='save_button', outline=True, color='primary'),
                              className="d-grid gap-2"), width=6)
         ]),
-
-
-        # html.Br(),
-        # html.Div(dbc.Button('Load Existing Concept Bank', outline=True, color='primary'), className="d-grid gap-2")
-
+        html.Div(id='save_output', style={'display': 'none'}),
     ])
 ]
 
@@ -145,6 +145,9 @@ app.layout = dbc.Container(children=
               [Input('start_ACE', 'n_clicks'),
                Input('clear_concept_bank', 'n_clicks'),
                Input('remove_concept_button', 'n_clicks'),
+               Input('import_cb_button', 'contents'),
+               Input('upload_concept', 'contents'),
+               State('upload_concept', 'filename'),
                State('model_selection', 'value'),
                State('data_path', 'value'),
                State('working_dir', 'value'),
@@ -157,37 +160,47 @@ app.layout = dbc.Container(children=
               background=True,
               prevent_initial_call=True,
               manager=background_callback_manager)
-def update_concept_bank(b1, b2, b3, model_name, path_to_source, path_to_working_dir, target_class, bottlenecks,
-                        concept_bank_dct, remove_concept_name):
+def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_contents, filenames, model_name, path_to_source,
+                        path_to_working_dir, target_class, bottlenecks, stored_info, remove_concept_name):
+
     triggered_id = ctx.triggered_id
 
+    if stored_info is None:
+        concept_bank_dct = {}
+        classes = []
+    else:
+        concept_bank_dct, classes = stored_info['concept_bank_dct'], stored_info['classes']
+
     if triggered_id == 'start_ACE':
-        #TODO add loading in current concept bank
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        concept_bank_dct = run_ACE(model_name, path_to_source, path_to_working_dir, target_class, bottlenecks)
+        # TODO add loading in current concept bank
+        concept_bank_dct, classes, found_new = run_ACE(model_name, path_to_source, path_to_working_dir, target_class,
+                                                       bottlenecks, concept_bank_dct, classes)
 
         # sort concept banks:
-        print('sorting concept bank')
-        for bottleneck in concept_bank_dct:
-            concept_bank_dct[bottleneck].sort_concepts()
+        if found_new:
+            print('sorting concept bank')
+            for bottleneck in concept_bank_dct:
+                if isinstance(concept_bank_dct[bottleneck], dict):
+                    concept_bank_dct[bottleneck] = ConceptBank(concept_bank_dct[bottleneck])
+                concept_bank_dct[bottleneck].sort_concepts()
 
-        concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in concept_bank_dct.keys()}
+        # convert ConceptBank objects to dicts for storing in dash
+        concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() if not isinstance(concept_bank_dct[bn], dict) else
+                            concept_bank_dct[bn] for bn in concept_bank_dct.keys()}
 
-        remove_options = []
-        for bn in concept_bank_dct:
-            for concept in concept_bank_dct[bn]['concept_names']:
-                label = f'{bn}, {concept}'
-                remove_options.append({'value': label, 'label': label})
+        remove_options = update_remove_options(concept_bank_dct)
+        bottleneck_options = update_bottleneck_options(concept_bank_dct)
+        stored_info = {'concept_bank_dct': concept_bank_dct, 'classes': classes}
 
-        bottleneck_options = [{'value': bn, 'label': bn} for bn in bottlenecks]
-
-        return 'Automatically extract concepts', concept_bank_dct, False, bottleneck_options, bottlenecks[0], \
+        return 'Automatically extract concepts', stored_info, False, bottleneck_options, bottlenecks[0], \
                remove_options, False, False, False, False
 
     elif triggered_id == 'clear_concept_bank':
         return 'Automatically extract concepts', None, False, None, None, None, True, True, True, True
 
     elif triggered_id == 'remove_concept_button':
+        bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
         #TODO Failsafe if all concepts are removed
         bottleneck, concept_name = remove_concept_name.split(', ')
 
@@ -198,18 +211,68 @@ def update_concept_bank(b1, b2, b3, model_name, path_to_source, path_to_working_
         # extract concept bank
         concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in concept_bank_dct.keys()}
 
-        # update options for removing concept
-        remove_options = []
-        for bn in concept_bank_dct:
-            for concept in concept_bank_dct[bn]['concept_names']:
-                label = f'{bn}, {concept}'
-                remove_options.append({'value': label, 'label': label})
+        remove_options = update_remove_options(concept_bank_dct)
+        bottleneck_options = update_bottleneck_options(concept_bank_dct)
+        stored_info = {'concept_bank_dct': concept_bank_dct, 'classes': classes}
 
-        bottlenecks = list(concept_bank_dct.keys())
-        bottleneck_options = [{'value': bn, 'label': bn} for bn in bottlenecks]
-
-        return 'Automatically extract concepts', concept_bank_dct, False, bottleneck_options, bottlenecks[0], \
+        return 'Automatically extract concepts', stored_info, False, bottleneck_options, bottlenecks[0], \
                remove_options, False, False, False, False
+
+    elif triggered_id == 'upload_concept':
+        bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
+        if model_name == 'InceptionV3':
+            model = tf.keras.applications.inception_v3.InceptionV3()
+        elif os.path.exists(model_name):
+            model = tf.keras.models.load_model(model_name)
+        else:
+            raise ValueError(f'{model_name} is not a directory to a model nor the InceptionV3model')
+
+        # load concept bank
+        concept_bank_dct = {bn: ConceptBank(concept_bank_dct[bn]) for bn in concept_bank_dct.keys()}
+        for bottleneck in bottlenecks:
+            concept_name = create_new_concept(list_of_contents, filenames, path_to_working_dir, bottleneck, model)
+
+            if bottleneck in concept_bank_dct:
+                concept_bank_dct[bottleneck].add_concept([concept_name])
+            else:
+                #TODO refactor class_to_id
+                class_to_id = ace_create_source_dir_imagenet('./data/ImageNet', path_to_source, 'toucan',
+                                                             num_random_concepts=20, ow=False)
+                concept_bank_dct[bottleneck] = ConceptBank(dict(bottleneck=bottleneck, working_dir=path_to_working_dir,
+                                                                concept_names=[concept_name], class_id_dct=class_to_id,
+                                                                model_name=model_name))
+            concept_bank_dct[bottleneck].sort_concepts()
+        # extract concept bank
+        concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in concept_bank_dct.keys()}
+
+        remove_options = update_remove_options(concept_bank_dct)
+        bottleneck_options = update_bottleneck_options(concept_bank_dct)
+        stored_info = {'concept_bank_dct': concept_bank_dct, 'classes': classes}
+
+        return 'Automatically extract concepts', stored_info, False, bottleneck_options, bottlenecks[0], \
+               remove_options, False, False, False, False
+
+    elif triggered_id == 'import_cb_button':
+        content_type, content_string = uploaded_cb.split(',')
+        decoded = base64.b64decode(content_string)
+        p_file = io.BytesIO(decoded)
+        stored_info = p.loads(p_file.read())
+        concept_bank_dct = stored_info['concept_bank_dct']
+        bottleneck_options = update_bottleneck_options(concept_bank_dct)
+        bottleneck = bottleneck_options[0]['value']
+        remove_options = update_remove_options(concept_bank_dct)
+        return 'Automatically extract concepts', stored_info, False, bottleneck_options, bottleneck, \
+               remove_options, False, False, False, False
+
+
+@app.callback(Output('save_output', 'children'),
+              [Input('save_button', 'n_clicks'),
+               State('concept_bank', 'data')],
+              prevent_initial_call=True)
+def save_concept_bank(b1, stored_info):
+    with open('./saved_concept_bank.pkl', 'wb') as file:
+        p.dump(stored_info, file, protocol=-1)
+    return None
 
 
 @app.callback([Output('cav_images', 'figure'),
@@ -219,10 +282,11 @@ def update_concept_bank(b1, b2, b3, model_name, path_to_source, path_to_working_
                State('concept_bank', 'data')],
               running=[(Output('bottleneck_dropdown_cav_images', 'disabled'), True, False)],
               prevent_initial_call=True)
-def create_figure(n_clicks, bottleneck, concept_bank_dct):
+def create_figure(n_clicks, bottleneck, stored_info):
     if (bottleneck is None) and not n_clicks:
         return blank_fig(), 0
     elif n_clicks:
+        concept_bank_dct = stored_info['concept_bank_dct']
         concept_bank = ConceptBank(concept_bank_dct[bottleneck])
         fig = concept_bank.plot_concepts(num_images=10)
         return fig, 0

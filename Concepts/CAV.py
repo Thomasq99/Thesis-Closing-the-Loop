@@ -91,7 +91,7 @@ class CAV:
 
 
 def get_or_train_cav(concepts: List, bottleneck: str,  cav_dir: str, act_dct: Dict,
-                     param_dct: Optional[Dict] = None, ow: bool = False) -> 'CAV':
+                     param_dct: Optional[Dict] = None, ow: bool = False, save: bool = True) -> 'CAV':
     """If exists loads a trained CAV, otherwise creates one.
 
     @param concepts: List [concept_name, random_counterpart_name].
@@ -100,7 +100,8 @@ def get_or_train_cav(concepts: List, bottleneck: str,  cav_dir: str, act_dct: Di
         {concept_name: activations_concept_imgs, random_counterpart_name:activations_random_imgs}.
     @param cav_dir: Name of the directory where the CAV is or will be stored.
     @param param_dct: Parameters of the SVM that differentiates between concepts and the random counterpart.
-    @param ow: If True, overwrite existing CAV.
+    @param ow: If True, overwrite existing CAV.z
+    @param save: If True, save CAV
     """
     cav_path = os.path.join(cav_dir, f'{bottleneck}-{concepts[0]}-{concepts[1]}.pkl')
     if os.path.exists(cav_path) and not ow:
@@ -108,5 +109,6 @@ def get_or_train_cav(concepts: List, bottleneck: str,  cav_dir: str, act_dct: Di
     else:
         cav = CAV(bottleneck, concepts[0], concepts[1])
         cav.train_cav(act_dct, param_dct)
-        cav.save_cav(cav_dir)
+        if save:
+            cav.save_cav(cav_dir)
         return cav
