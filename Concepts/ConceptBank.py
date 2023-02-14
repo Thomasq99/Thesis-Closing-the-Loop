@@ -1,19 +1,23 @@
 from Concepts.CAV import CAV
 from Concepts.helper import load_images_from_files, get_gradients_of_images, get_grad_model
 import os
-from typing import List
+from typing import List, Dict, Optional, Tuple
 from plotly.subplots import make_subplots
 from skimage.segmentation import mark_boundaries
 import numpy as np
 import plotly.graph_objects as go
-from typing import Dict
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 import tensorflow as tf
 
 
 class ConceptBank:
+    """ Class to use as a concept bank. For a current session all concepts can be stored in a concept bank.
+    Moreover, the TCAV scores of concepts in the concept bank can be computed. The concepts can also be visualized.
+
+    """
     def __init__(self, concept_dct: Dict):
+        """ Initializes a concept bank from a dictionary with format {concept_attr: value}"""
         self.bottleneck = concept_dct.get('bottleneck', None)
         self.concept_names = concept_dct.get('concept_names', None)
         self.working_dir = concept_dct.get('working_dir', None)
@@ -24,40 +28,62 @@ class ConceptBank:
         self.concepts = concept_dct.get('tcav_scores', None)
 
     def add_concept(self, concepts: List):
+        """ Adds a list of concept(s) to the concept bank.
+
+        @param concepts: List of concepts to add. [concept_name, concept_name2]"""
         if self.in_memory:
             # TODO implement
             raise ValueError('Not implemented when CAVs are in memory')
         else:
+            # TODO assert to check if exists
             self.concept_names.extend(concepts)
 
-    def remove_concept(self, concept_name):
+    def remove_concept(self, concept_name: str):
+        """ Removes a concept from the Concept Bank.
+
+        @param concept_name: Name of the concept to be removed"""
         remove_idx = self.concept_names.index(concept_name)
         del self.concept_names[remove_idx]
         if self.in_memory:
             del self.concepts[remove_idx]
-            if self.tcav_scores:
-                del self.tcav_scores[remove_idx]
-
-    def rename_concept(self, old_name, new_name):
-        pass
+        if self.tcav_scores:
+            del self.tcav_scores[remove_idx]
 
     def sort_concepts(self, discovery_images=None):
+        """Sorts concepts based on the TCAV scores of the concepts."""
+
+        # compute TCAV scores if needed
         if (self.tcav_scores is None) or (len(self.tcav_scores)) != (len(self.concept_names)):
             self.compute_tcav_scores(discovery_images=discovery_images)
 
+        # get indices of sorted scores
         sorted_idxs = np.argsort(self.tcav_scores)[::-1]
+
+        # sort based on indices
         self.tcav_scores = list(np.array(self.tcav_scores)[sorted_idxs])
         self.concept_names = list(np.array(self.concept_names)[sorted_idxs])
         if self.in_memory:
             self.concepts = list(np.array(self.concepts)[sorted_idxs])
 
-    def compute_tcav_scores(self, discovery_images=None):
+    def compute_tcav_scores(self, discovery_images: Optional[Dict] = None):
+        """Computes the TCAV scores of all concept in the Concept Bank. In particular, if discovery_images is not
+        supplied images from the classes from which the concepts are extracted are used to compute the TCAV_score on.
+
+        @param discovery_images: Dictionary containing an array of discovery images for each class.
+            format is {concept_class_name: img_array}
+        """
+
+        # split user defined concepts from automatically extracted concepts
         concept_names_ACE = [concept for concept in self.concept_names if 'userDefined' not in concept]
         concept_names_user_defined = [concept for concept in self.concept_names if 'userDefined' in concept]
+
+        # For the discovered concepts get the classes for which they were discovered
         concept_classes = np.array([concept.split('_')[0] for concept in concept_names_ACE])
+
+        # load images if discovery_images is not supplied
         if discovery_images is None:
             discovery_images = {}
-            for concept in set(concept_classes):
+            for concept in set(concept_classes):  # for each concept load the class images
                 image_dir = os.path.join(self.working_dir, 'concepts', concept, 'images')
                 discovery_images[concept] = load_images_from_files([os.path.join(image_dir, file) for file in
                                                                     os.listdir(image_dir)], do_shuffle=True,
@@ -67,6 +93,7 @@ class ConceptBank:
             self.load_in_memory()
             self.in_memory = False
 
+        # load in tensorflow model
         if self.model_name == 'InceptionV3':
             model = tf.keras.applications.inception_v3.InceptionV3()
         elif os.path.exists(self.model_name):
@@ -74,11 +101,12 @@ class ConceptBank:
         else:
             raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
 
+        # For each concept automatically extracted using ACE compute the TCAV scores.
         tcav_scores = []
         concepts_ACE = [self.concepts[i] for i in range(len(self.concepts)) if 'userDefined'
                         not in self.concept_names[i]]
         for concept_class in set(concept_classes):
-            # get gradients
+            # get gradients of images w.r.t. bottleneck layer
             class_id = self.class_id_dct[concept_class]
             concepts_of_concept_class = np.array(concepts_ACE)[concept_classes == concept_class]
             discovery_images_of_class = discovery_images[concept_class]
@@ -88,18 +116,21 @@ class ConceptBank:
             # compute tcav scores
             tcav_scores.extend([concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class])
 
-        tcav_scores.extend([float('-inf') for concept in concept_names_user_defined])
+        tcav_scores.extend([float('-inf') for concept in concept_names_user_defined])  # TODO get TCAV for user defined
         self.tcav_scores = tcav_scores
 
         if not self.in_memory:
+            # remove from memory
             self.concepts = None
 
-    def to_dict(self):
+    def to_dict(self) -> Dict:
+        """ Exports a ConceptBank as a dictionary."""
         return {'bottleneck': self.bottleneck, 'concept_names': self.concept_names, 'working_dir': self.working_dir,
                 'class_id_dct': self.class_id_dct, 'model_name': self.model_name, 'in_memory': self.in_memory,
                 'concepts': self.concepts, 'tcav_scores': self.tcav_scores}
 
     def load_in_memory(self):
+        """ Loads the CAVs of the concepts in memory"""
         if not self.in_memory:
             self.concepts = [CAV.load_cav(os.path.join(self.working_dir, 'cavs', f'{self.bottleneck}-{concept}.pkl'))
                              for concept in self.concept_names]
@@ -107,23 +138,30 @@ class ConceptBank:
         else:
             print('Already in memory.')
 
-    def load_concept_imgs_ace(self, concept_names, num_images, shape):
+    def load_concept_imgs_ace(self, concept_names: List, num_images: int, shape: Tuple[int, int]):
+        """ Loads the images, patches and image numbers for each concept extracted using ACE.
+
+        @param concept_names: List of the names of the concepts extracted using ACE
+        @param num_images: Amount of images to load for each concept
+        @param shape: Tuple denoting the shape of the images to be loaded as
+        """
         concept_dir = os.path.join(self.working_dir, 'concepts')
         concepts_dict = {'concepts': concept_names}
 
-        images_locs = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept)
+        # get paths to images and patches
+        image_paths = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept)
                        for concept in concept_names]
-        patches_locs = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept + '_patches')
+        patch_paths = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept + '_patches')
                         for concept in concept_names]
 
         for i in range(len(concept_names)):
 
-            images, filenames = load_images_from_files(filenames=[os.path.join(images_locs[i], file)
-                                                                  for file in os.listdir(images_locs[i])[:num_images]],
+            images, filenames = load_images_from_files(filenames=[os.path.join(image_paths[i], file)
+                                                                  for file in os.listdir(image_paths[i])[:num_images]],
                                                        return_filenames=True, do_shuffle=False, shape=shape)
 
-            patches = load_images_from_files(filenames=[os.path.join(patches_locs[i], file)
-                                                        for file in os.listdir(patches_locs[i])[:num_images]],
+            patches = load_images_from_files(filenames=[os.path.join(patch_paths[i], file)
+                                                        for file in os.listdir(patch_paths[i])[:num_images]],
                                              do_shuffle=False, shape=shape)
 
             image_numbers = [int(filename.split('_')[-1].split('.')[0]) for filename in filenames]
@@ -160,7 +198,7 @@ class ConceptBank:
         # create subplot titles
         subplot_titles = []
         middle = num_images // 2
-        idx = -1 # ensure that idx_user_defined gets the first user_defined tcav_score
+        idx = -1  # ensure that idx_user_defined gets the first user_defined tcav_score
         for idx, concept in enumerate(concept_names_ACE):
             title = ['']*2*num_images
             if self.tcav_scores is not None:

@@ -57,7 +57,7 @@ class CAV:
             p.dump(cav_dct, file, protocol=-1)
 
     def train_cav(self, act_dct: Dict, param_dct: Dict):  # TODO add param_dict
-        """Trains a CAV by fitting an SVM to predict the concept from the concept and its random counterpart.
+        """Trains a CAV by fitting an SVM to predict the concept from the concept images and the random counterparts.
 
         @param act_dct: Dictionary containing the activations of the concept and random counterpart. Of the form:
             {concept_name: activations_concept_imgs, random_counterpart_name:activations_random_imgs}.
@@ -76,12 +76,12 @@ class CAV:
         svm = LinearSVC()
         svm.fit(X_train, y_train)
         self.accuracy = svm.score(X_test, y_test)
-        self.cav = svm.coef_[0].reshape(1, -1)  # TODO maybe -1, 1 is nicer
+        self.cav = svm.coef_[0].reshape(1, -1)
         self.intercept = svm.intercept_[0]
         self.norm = np.linalg.norm(self.cav, ord=2)
 
     def compute_tcav_score(self, gradients: np.ndarray):
-        """Computes the TCAV score of the cav w.r.t. the gradients of images of the bottleneck layer.
+        """Computes the TCAV score of the CAV w.r.t. the gradients of images of the bottleneck layer.
 
         @param gradients: Array containing the gradients of images w.r.t. the bottleneck layer of a model.
         @return: The TCAV score of the CAV w.r.t the gradients.

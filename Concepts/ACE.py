@@ -431,12 +431,13 @@ class ACE:
             bn_dic.pop('cost', None)
             self.concept_dict[bn] = bn_dic
 
-    def _random_concept_activations(self, bottleneck_layer, bottleneck_model, random_concept):
+    def _random_concept_activations(self, bottleneck_layer: str, bottleneck_model: tf.keras.Model, random_concept: str):
         """Wrapper for computing or loading activations of random concepts.
 
-        Takes care of making, caching (if desired) and loading activations.
+        Takes care of making, caching and loading activations.
 
-        @param str bottleneck_layer: The bottleneck layer name.
+        @param bottleneck_layer: The bottleneck layer name.
+        @param bottleneck_model: The pretrained tensorflow model up to and including the bottleneck layer.
         @param str random_concept: The name of the random concept. e.g. "random500_0".
         @return A nested dict in the form of {concept:{bottleneck:activation}}.
         """
@@ -448,40 +449,47 @@ class ACE:
         if not os.path.exists(rnd_acts_path):
             rnd_imgs = self.load_concept_imgs(random_concept, self.max_imgs)
             activations = get_activations_of_images(rnd_imgs, bottleneck_model)
-            np.save(rnd_acts_path, activations, allow_pickle=False)
+            np.save(rnd_acts_path, activations)
             del activations
             del rnd_imgs
         return np.load(rnd_acts_path).squeeze()
 
-    def _calculate_cav(self, concept, random_concept, bottleneck, bottleneck_model, act_c, ow):
+    def _calculate_cav(self, concept: str, random_concept: str, bottleneck: str, bottleneck_model: tf.keras.Model,
+                       act_c: np.ndarray, ow: bool):
         """Calculates a single cav for a concept and one random counterpart.
 
-          @param concept: concept name.
-          @param random_concept: random concept name.
-          @param bottleneck: bottleneck layer name.
-          @param act_c: activation matrix of the concept in the 'bn' layer.
-          @param ow: overwrite if CAV already exists.
+          @param concept: Name of the concept
+          @param random_concept: Name of the random counterpart.
+          @param bottleneck: Name of the bottleneck layer.
+          @param bottleneck_model: The pretrained tensorflow model up to and including the bottleneck layer.
+          @param act_c: Activation matrix of the concept in the 'bottleneck' layer.
+          @param ow: If True, overwrites already existing CAV.
           @return The accuracy of the computed CAV.
         """
         act_r = self._random_concept_activations(bottleneck, bottleneck_model, random_concept)
-        act_r = act_r.reshape((act_r.shape[0], -1))
+        act_r = act_r.reshape((act_r.shape[0], -1))  # flatten to allow for training
         cav_instance = get_or_train_cav([concept, random_concept], bottleneck,
                                         act_dct={concept: act_c, random_concept: act_r}, cav_dir=self.cav_dir, ow=ow)
         return cav_instance.accuracy
 
-    def _concept_cavs(self, bottleneck, bottleneck_model, concept, activations, randoms=None, ow=True) -> List:
+    def _concept_cavs(self, bottleneck: str, bottleneck_model: tf.keras.Model, concept: str,
+                      activations: np.ndarray, randoms: Optional[List] = None, ow: bool = True) -> List:
         """Calculates CAVs of a concept versus all the random counterparts.
 
         @param bottleneck: Bottleneck layer name.
+        @param bottleneck_model: The pretrained tensorflow model up to and including the bottleneck layer.
         @param concept: Concept name.
         @param activations: Activations of the concept in the bottleneck layer.
-        @param randoms: None if the class random concepts are going to be used.
+        @param randoms: None if the class random concepts are going to be used. Otherwise, a list with the names of the
+            random concepts against which the CAVs will be trained
         @param ow: If True, overwrites existing CAVs.
         @return accuracies: A List of the accuracies of the concept versus all random counterparts.
         """
-        activations = activations.reshape((activations.shape[0], -1))
+        activations = activations.reshape((activations.shape[0], -1))  # flatten activation matrix
         if randoms is None:
-            randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]
+            randoms = ['random500_{}'.format(i) for i in np.arange(self.num_random_concepts)]  # load in random concepts
+
+        # compute CAVs
         if self.num_workers:
             pool = multiprocessing.Pool(self.num_workers)
             accuracies = pool.map(
@@ -500,8 +508,8 @@ class ACE:
 
         @param min_acc: Delete discovered concept if average classification accuracy of the CAV is less than min_acc.
         @param ow: If True, overwrites already calculated CAVs.
-        @param in_memory: If True, concept images are stored in the self.concept_dict
-            If False, concept images are stored in the concept_dir.
+        @param in_memory: If True, concept images are loaded from the self.concept_dict
+            If False, concept images are loaded from the concept_dir.
         @param concept_dir: Directory where concept images are stored.
         @return acc: A dictionary of classification accuracy of linear boundaries orthogonal to CAV vectors of the form
          {'bottleneck layer':{'concept name':[list of accuracies], ...}, ...}. Also includes the random concept and the
@@ -513,8 +521,9 @@ class ACE:
         for bottleneck in self.bottlenecks:
             # compute concept activations
             # prevent tf.function tracing by defining model outside for loop
-            bottleneck_model = get_bottleneck_model(self.model, bottleneck)
+            bottleneck_model = get_bottleneck_model(self.model, bottleneck)  # get keras model up to the bottleneck layer
             for concept in self.concept_dict[bottleneck]['concepts']:
+                # load concept images
                 if in_memory:
                     concept_imgs = self.concept_dict[bottleneck][concept]['images']
                 else:
@@ -522,9 +531,13 @@ class ACE:
                                  os.listdir(os.path.join(concept_dir, concept, bottleneck))]
                     concept_imgs = load_images_from_files(filepaths, do_shuffle=False)
 
+                # get activations w.r.t the bottleneck layer of the concept images
                 concept_acts = get_activations_of_images(concept_imgs, bottleneck_model)
                 accuracy[bottleneck][concept] = self._concept_cavs(bottleneck, bottleneck_model, concept, concept_acts,
-                                                                   ow=ow)
+                                                                   ow=ow)  # compute cavs
+
+                # delete if average accuracy of separating concept against random concepts is smaller
+                # than user defined number
                 if np.mean(accuracy[bottleneck][concept]) < min_acc:
                     concepts_to_delete.append((bottleneck, concept))
 
