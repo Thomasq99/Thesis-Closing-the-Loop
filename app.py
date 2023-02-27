@@ -14,6 +14,10 @@ import pickle as p
 import base64
 import io
 
+MAX_ROWS_CONCEPT_VIS = 60
+SHAPE_IMGS_CONCEPT_VIS = (60, 60)
+NUM_IMGS_PER_CONCEPT_VIS = 10
+
 # initialize background caching
 cache = diskcache.Cache("./cache")
 background_callback_manager = DiskcacheManager(cache)
@@ -130,12 +134,12 @@ Concept_bank_tab_content = dbc.Container(
             ], fluid=True)
     ], fluid=True)
 
-exploring_concept_space_tab_content = html.Div('hoi')
+exploring_concept_space_tab_content = html.Div('In progress')
 
 tabs = dbc.Tabs(
     [
         dbc.Tab(Concept_bank_tab_content, label='Concept Bank'),
-        dbc.Tab(exploring_concept_space_tab_content, label='Exploring the Concept Space', disabled=True)
+        dbc.Tab(exploring_concept_space_tab_content, label='post-hoc CBM', disabled=True)
     ]
 )
 
@@ -299,7 +303,8 @@ def create_figure(n_clicks, bottleneck, stored_info):
     elif n_clicks:
         concept_bank_dct = stored_info['concept_bank_dct']
         concept_bank = ConceptBank(concept_bank_dct[bottleneck])
-        fig = concept_bank.plot_concepts(num_images=10)
+        fig = concept_bank.plot_concepts(num_images=NUM_IMGS_PER_CONCEPT_VIS, max_rows=MAX_ROWS_CONCEPT_VIS,
+                                         shape=SHAPE_IMGS_CONCEPT_VIS)
         return fig, 0
     else:
         raise dash.exceptions.PreventUpdate()

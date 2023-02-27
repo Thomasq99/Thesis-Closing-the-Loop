@@ -182,7 +182,7 @@ class ConceptBank:
             concepts_dict[concept_names[i]] = images
         return concepts_dict
 
-    def plot_concepts(self, num_images=10, shape=(60, 60)):
+    def plot_concepts(self, num_images=10, shape=(60, 60), max_rows=None):
         if not self.in_memory:
             self.load_in_memory()
             self.in_memory = False
@@ -219,8 +219,12 @@ class ConceptBank:
             title[middle] = subtitle
             subplot_titles.extend(title)
 
-        fig = make_subplots(n_rows, num_images, horizontal_spacing=0.1/num_images, vertical_spacing=0.3/n_rows,
-                            shared_xaxes=True, shared_yaxes=True, subplot_titles=subplot_titles)
+        if max_rows is not None:
+            fig = make_subplots(max_rows, num_images, horizontal_spacing=0.1/num_images, vertical_spacing=0.3/max_rows,
+                                shared_xaxes=True, shared_yaxes=True, subplot_titles=subplot_titles)
+        else:
+            fig = make_subplots(n_rows, num_images, horizontal_spacing=0.1/num_images, vertical_spacing=0.3/n_rows,
+                                shared_xaxes=True, shared_yaxes=True, subplot_titles=subplot_titles)
 
         j = 1
         discovery_images_dct = {}
@@ -258,8 +262,20 @@ class ConceptBank:
                 fig.add_trace(go.Image(z=image, hoverinfo='none'), j, i + 1)
             j += 1
 
-        fig.update_layout(autosize=True,
-                          width=9 * 100,
+        # if max_rows is set
+        if max_rows is not None:
+            for q in range(max_rows - j):
+                for i in range(num_images):
+                    fig.add_trace(go.Image(z=np.zeros(shape=(1, 1)), hoverinfo='none'), q+j, i+1)
+
+            fig.update_layout(autosize=True,
+                              width=(num_images - 1) * 100,
+                              height=max_rows * 100,
+                              margin=dict(l=20, r=20, b=20, t=50),
+                              overwrite=True)
+        else:
+            fig.update_layout(autosize=True,
+                          width= (num_images-1) * 100,
                           height=n_rows * 100,
                           margin=dict(l=20, r=20, b=20, t=50),
                           overwrite=True)
