@@ -1,11 +1,11 @@
+import time
+
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
 import dash_bootstrap_components as dbc
 from dash.dependencies import Input, Output, State
 from Dash_helper import run_ACE, create_new_concept, get_sessions_concepts, get_sessions_bottlenecks, blank_fig, \
-    get_class_labels
-
-from Concepts.helper import ace_create_source_dir_imagenet
+    get_class_labels, load_model
 import os
 import diskcache
 from Concepts.ConceptBank import ConceptBank
@@ -16,7 +16,7 @@ import io
 
 MAX_ROWS_CONCEPT_VIS = 60
 SHAPE_IMGS_CONCEPT_VIS = (60, 60)
-NUM_IMGS_PER_CONCEPT_VIS = 10
+NUM_IMGS_PER_CONCEPT_VIS = 8
 
 # initialize background caching
 cache = diskcache.Cache("./cache")
@@ -145,6 +145,7 @@ tabs = dbc.Tabs(
 
 app.layout = dbc.Container([html.H2('Closing the Concept Loop', style={'textAlign': 'center'}), tabs], fluid=True)
 
+
 @app.callback([Output('spinner', 'children'),
                Output('concept_bank', 'data'),
                Output('bottleneck_dropdown_cav_images', 'disabled'),
@@ -188,7 +189,6 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
     if triggered_id == 'start_ACE':  # automatically extract concepts
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        # TODO add loading in current concept bank
         concept_bank_dct, classes, found_new = run_ACE(model_name, path_to_source, path_to_working_dir, target_class,
                                                        bottlenecks, concept_bank_dct, classes)
 
@@ -216,7 +216,6 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
     elif triggered_id == 'remove_concept_button':
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        # TODO Failsafe if all concepts are removed
         bottleneck, concept_name = remove_concept_name.split(', ')
 
         # load concept bank
@@ -235,24 +234,18 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
     elif triggered_id == 'upload_concept':
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        if model_name == 'InceptionV3':
-            model = tf.keras.applications.inception_v3.InceptionV3()
-        elif os.path.exists(model_name):
-            model = tf.keras.models.load_model(model_name)
-        else:
-            raise ValueError(f'{model_name} is not a directory to a model nor the InceptionV3model')
+        model = load_model(model_name)
 
         # load concept bank
         concept_bank_dct = {bn: ConceptBank(concept_bank_dct[bn]) for bn in concept_bank_dct.keys()}
         for bottleneck in bottlenecks:
-            concept_name = create_new_concept(list_of_concept_images, image_filenames, path_to_working_dir, bottleneck, model)
+            concept_name = create_new_concept(list_of_concept_images, image_filenames, path_to_working_dir, bottleneck,
+                                              model)
 
             if bottleneck in concept_bank_dct:
                 concept_bank_dct[bottleneck].add_concept([concept_name])
             else:
-                # TODO refactor class_to_id
-                class_to_id = ace_create_source_dir_imagenet('./data/ImageNet', path_to_source, 'toucan',
-                                                             num_random_concepts=20, ow=False)
+                class_to_id = get_class_labels(path_to_source)
                 concept_bank_dct[bottleneck] = ConceptBank(dict(bottleneck=bottleneck, working_dir=path_to_working_dir,
                                                                 concept_names=[concept_name], class_id_dct=class_to_id,
                                                                 model_name=model_name))
@@ -317,10 +310,10 @@ def store_model_layers(is_model_valid, model_name):
     if is_model_valid:
         if model_name == 'InceptionV3':
             model = tf.keras.applications.inception_v3.InceptionV3()
-            model_layers = [layer.name for layer in model.layers]
-            return {'model_layers': model_layers}
         else:
-            return None  # TODO IMPLEMENT
+            model = tf.keras.models.load_model(model_name)
+        model_layers = [layer.name for layer in model.layers]
+        return {'model_layers': model_layers}
     else:
         return None
 
@@ -346,9 +339,14 @@ def validate_model_selection(model_name):
     if model_name == 'InceptionV3':
         return True, False
     else:
-        return False, True
-
-    #TODO Implement model selection for own path
+        try:
+            start = time.time()
+            tf.keras.models.load_model(model_name)
+            print(time.time() - start)
+            return True, False
+        except:
+            print(f'{model_name} is not a valid model')
+            return False, True
 
 
 @app.callback([Output('target_class', 'valid'), Output('target_class', 'invalid')],
@@ -357,7 +355,7 @@ def validate_model_selection(model_name):
                Input('data_path', 'valid')])
 def validate_class(target_class, data_path, data_path_validity):
     if not data_path_validity:
-        return False, True #TODO add error message?
+        return False, True
     else:
         target_class_lst = list(get_class_labels(data_path).keys())
         if target_class in target_class_lst:

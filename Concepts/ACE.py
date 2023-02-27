@@ -65,7 +65,7 @@ class ACE:
         if model_name == 'InceptionV3':
             self.model = tf.keras.applications.inception_v3.InceptionV3()
         elif os.path.exists(self.model_name):
-            self.model = tf.keras.models.load_model(self.model_name)
+            self.model = tf.keras.models.load_model(self.model_name, compile=False)
         else:
             raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
         self.bottlenecks = bottlenecks

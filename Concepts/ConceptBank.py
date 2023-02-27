@@ -269,16 +269,16 @@ class ConceptBank:
                     fig.add_trace(go.Image(z=np.zeros(shape=(1, 1)), hoverinfo='none'), q+j, i+1)
 
             fig.update_layout(autosize=True,
-                              width=(num_images - 1) * 100,
+                              width=9 * 100,
                               height=max_rows * 100,
                               margin=dict(l=20, r=20, b=20, t=50),
                               overwrite=True)
         else:
             fig.update_layout(autosize=True,
-                          width= (num_images-1) * 100,
-                          height=n_rows * 100,
-                          margin=dict(l=20, r=20, b=20, t=50),
-                          overwrite=True)
+                              width=9 * 100,
+                              height=n_rows * 100,
+                              margin=dict(l=20, r=20, b=20, t=50),
+                              overwrite=True)
         fig.update_xaxes(showgrid=False, showticklabels=False, zeroline=False)
         fig.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
 

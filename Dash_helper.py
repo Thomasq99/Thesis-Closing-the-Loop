@@ -63,7 +63,7 @@ def prepare_ACE(model_name: str, source_data: str, working_dir: str, target_clas
                 overwrite: bool = False) -> Tuple[str, 'ACE']:
     """ Prepares directories and data necessary for running ACE. Also initializes an ACE object
 
-    @param model_name: Name of the model. Can currently only be Inception V3. TODO
+    @param model_name: Name of the model.
     @param source_data: Name of the directory containing the source images.
     @param working_dir: Name of the session directory.
     @param target_class: Name of the class for which concepts need to be found.
@@ -71,15 +71,17 @@ def prepare_ACE(model_name: str, source_data: str, working_dir: str, target_clas
     @param overwrite: If True, overwrite existing directories.
     @return: Tuple consisting of (Name of the directory where concepts are stored, ACE object)
     """
-    # TODO write asserts
 
     # Create and, if wanted, clear necessary directories
     activations_dir, cavs_dir, discovered_concepts_dir = prepare_output_directories(working_dir, target_class,
                                                                                     bottlenecks, overwrite)
-
+    # TODO REMOVE IN THE END.
+    # TODO add default folder structure and function to extract class_to_id from it
     # IMPORTANT prepare data to the right format. Change this function for your own use.
-    class_to_id = ace_create_source_dir_imagenet('./data/ImageNet', source_data, target_class, num_random_concepts=20,
-                                                 ow=False)
+    if 'ImageNet' in source_data:
+        print('Dealing with ImageNet')
+        class_to_id = ace_create_source_dir_imagenet('./data/ImageNet', source_data, target_class,
+                                                     num_random_concepts=20, ow=False)
     print('data prepared')
 
     # initialize ACE
@@ -95,7 +97,7 @@ def run_ACE(model_name: str, path_to_source: str, path_to_working_dir: str, targ
     are already computed previously, they will be loaded instead of computed.
     Concepts already loaded in current session will be skipped.
 
-    @param model_name: Name of the tensorflow model. Can currently only be InceptionV3.
+    @param model_name: Name of the tensorflow model or path to the tensorflow model.
     @param path_to_source: Name of the source directory where the images are stored.
     @param path_to_working_dir: Name of the session directory.
     @param target_class: Name of the class for which the concepts will be found.
@@ -359,3 +361,13 @@ def get_class_labels(data_folder_path: str):
         id_to_folder[int(key)] = value[0]
         class_to_id[value[1]] = int(key)
     return class_to_id
+
+
+def load_model(model_name):
+    if model_name == 'InceptionV3':
+        model = tf.keras.applications.inception_v3.InceptionV3()
+    elif os.path.exists(model_name):
+        model = tf.keras.models.load_model(model_name, compile=False)
+    else:
+        raise ValueError(f'{model_name} is not a directory to a model nor the InceptionV3model')
+    return model
