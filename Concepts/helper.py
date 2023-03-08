@@ -74,7 +74,7 @@ def create_concept(output_dir: str, images: np.ndarray, max_imgs: int, no_of_img
 
 def ace_create_source_dir_imagenet(imagenet_folder_path: str, source_dir: str, target_class: str,
                                    target_shape: Tuple = (299, 299),  num_random_concepts: int = 20,
-                                   max_imgs_target_class: int = 100, ow: bool = False) -> Dict:
+                                   max_imgs_target_class: int = 1000, ow: bool = False) -> Dict:
     """Helper function to transform data from the imagenet_folder_path directory to the required data format
     for running ACE. In particular, a folder of data will be created in source_dir. Images for the target_class and
     random concepts are stored in subfolders in this folder.

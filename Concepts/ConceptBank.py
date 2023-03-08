@@ -1,5 +1,6 @@
 from Concepts.CAV import CAV
-from Concepts.helper import load_images_from_files, get_gradients_of_images, get_grad_model
+from Concepts.helper import load_images_from_files, get_gradients_of_images, get_grad_model, get_activations_of_images,\
+    get_bottleneck_model
 import os
 from typing import List, Dict, Optional, Tuple
 from plotly.subplots import make_subplots
@@ -26,6 +27,16 @@ class ConceptBank:
         self.in_memory = concept_dct.get('in_memory', False)
         self.tcav_scores = concept_dct.get('tcav_scores', None)
         self.concepts = concept_dct.get('tcav_scores', None)
+
+    def load_model(self):
+        # load in tensorflow model
+        if self.model_name == 'InceptionV3':
+            model = tf.keras.applications.inception_v3.InceptionV3()
+        elif os.path.exists(self.model_name):
+            model = tf.keras.models.load_model(self.model_name)
+        else:
+            raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
+        return model
 
     def add_concept(self, concepts: List):
         """ Adds a list of concept(s) to the concept bank.
@@ -93,13 +104,7 @@ class ConceptBank:
             self.load_in_memory()
             self.in_memory = False
 
-        # load in tensorflow model
-        if self.model_name == 'InceptionV3':
-            model = tf.keras.applications.inception_v3.InceptionV3()
-        elif os.path.exists(self.model_name):
-            model = tf.keras.models.load_model(self.model_name)
-        else:
-            raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
+        model = self.load_model()
 
         # For each concept automatically extracted using ACE compute the TCAV scores.
         tcav_scores = []
@@ -181,6 +186,29 @@ class ConceptBank:
                                             do_shuffle=False, shape=shape)
             concepts_dict[concept_names[i]] = images
         return concepts_dict
+
+    def project_onto_conceptspace(self, images):
+        model = self.load_model()
+        if not self.in_memory:
+            self.load_in_memory()
+            self.in_memory = False
+
+        activations = get_activations_of_images(images, get_bottleneck_model(model, self.bottleneck))
+        activations = activations.reshape((activations.shape[0], -1))
+        concepts = []
+        concept_norms = []
+        for concept in self.concepts:
+            concepts.append(concept.cav)
+            concept_norms.append(concept.norm)
+        concept_matrix = np.concatenate(concepts, axis=0)
+        concept_norms = np.array(concept_norms)
+        projection = (activations @ concept_matrix.T)/concept_norms
+
+        if not self.in_memory:
+            # remove from memory
+            self.concepts = None
+
+        return projection
 
     def plot_concepts(self, num_images=10, shape=(60, 60), max_rows=None):
         if not self.in_memory:

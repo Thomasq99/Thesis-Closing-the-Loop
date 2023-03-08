@@ -1,5 +1,7 @@
 import time
-
+from sklearn import metrics
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LogisticRegressionCV
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
 import dash_bootstrap_components as dbc
@@ -9,10 +11,13 @@ from Dash_helper import run_ACE, create_new_concept, get_sessions_concepts, get_
 import os
 import diskcache
 from Concepts.ConceptBank import ConceptBank
+from Concepts.helper import load_images_from_files
 import tensorflow as tf
 import pickle as p
 import base64
 import io
+import numpy as np
+import plotly.express as px
 
 MAX_ROWS_CONCEPT_VIS = 60
 SHAPE_IMGS_CONCEPT_VIS = (60, 60)
@@ -70,7 +75,7 @@ settings_menu = [
             dbc.Label('Model selection:'),
             dbc.Input(value='InceptionV3', id='model_selection', type='text', required=True),
             dbc.Label('Data directory:'),
-            dbc.Input(value='./data/ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
+            dbc.Input(value='./data/ACE_ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
                       type='text')
         ], width=6),
 
@@ -134,12 +139,32 @@ Concept_bank_tab_content = dbc.Container(
             ], fluid=True)
     ], fluid=True)
 
-exploring_concept_space_tab_content = html.Div('In progress')
+exploring_concept_space_tab_content = dbc.Container(
+    [
+        dbc.Row(
+            [
+                dbc.Col([dcc.Graph(figure=blank_fig(), id='weight_vis_CBM')], width={"size": 4, "offset": 1}),
+                dbc.Col([dcc.Graph(figure=blank_fig(), id='ROC_vis_CBM')], width={"size": 4, "offset": 1}),
+            ]
+        ),
+
+        dbc.Row(
+            [
+                dbc.Col([dcc.Dropdown(id='choose_class', multi=True, className="dash-bootstrap",
+                                      placeholder='Choose which classes to classify based on the concepts in the '
+                                                  'concept bank'),
+                         dbc.InputGroup([dbc.Button("Start ph_CBM", id='start_ph_CBM', outline=True,
+                                                    color='primary', n_clicks=0),
+                                         dbc.Select(id='bottleneck_phCBM')])]
+                        , width={"size": 9, "offset": 1})
+            ]
+        )
+    ], fluid=True)
 
 tabs = dbc.Tabs(
     [
         dbc.Tab(Concept_bank_tab_content, label='Concept Bank'),
-        dbc.Tab(exploring_concept_space_tab_content, label='post-hoc CBM', disabled=True)
+        dbc.Tab(exploring_concept_space_tab_content, label='post-hoc CBM')
     ]
 )
 
@@ -202,7 +227,7 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
         # convert ConceptBank objects to dicts for storing in dash
         concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() if not isinstance(concept_bank_dct[bn], dict) else
-        concept_bank_dct[bn] for bn in concept_bank_dct.keys()}
+                            concept_bank_dct[bn] for bn in concept_bank_dct.keys()}
 
         remove_options = get_sessions_concepts(concept_bank_dct)
         bottleneck_options = get_sessions_bottlenecks(concept_bank_dct)
@@ -302,6 +327,83 @@ def create_figure(n_clicks, bottleneck, stored_info):
     else:
         raise dash.exceptions.PreventUpdate()
 
+
+@app.callback([Output('choose_class', 'options'),
+               Output('bottleneck_phCBM', 'options'),
+               Output('bottleneck_phCBM', 'value')],
+              [Input('concept_bank', 'data'),
+              State('data_path', 'value')], prevent_initial_call=True)
+def get_vis_phCBM_options(stored_info, data_path):
+    if stored_info is None:
+        return None, None, None
+    else:
+        concept_bank_dct = stored_info['concept_bank_dct']
+        bottleneck_options = get_sessions_bottlenecks(concept_bank_dct)
+        classes = list(get_class_labels(data_path).keys())
+        options_classes = [{'label': class_, 'value': class_} for class_ in classes]
+        return options_classes, bottleneck_options, bottleneck_options[0]['value']
+
+
+@app.callback([Output('weight_vis_CBM', 'figure'),
+               Output('ROC_vis_CBM', 'figure')],
+              [Input('start_ph_CBM', 'n_clicks'),
+               State('choose_class', 'value'),
+               State('concept_bank', 'data'),
+               State('bottleneck_phCBM', 'value'),
+               State('data_path', 'value')],
+              prevent_initial_call=True)
+def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
+
+    print('Projecting images onto concept subspace')
+    concept_bank_dct = stored_info['concept_bank_dct']
+    concept_bank = ConceptBank(concept_bank_dct[bottleneck])
+
+    images = []
+    labels = []
+    for idx, class_ in enumerate(classes):
+        filenames = [os.path.join(data_path, class_, filename) for filename in
+                     os.listdir(os.path.join(data_path, class_))]
+        images.append(load_images_from_files(filenames, max_imgs=1000))
+        labels.extend([idx]*len(filenames))
+    images_arr = np.concatenate(images, axis=0)
+    projected_imgs = concept_bank.project_onto_conceptspace(images_arr)
+
+    print('training linear model to classify images based on concepts')
+    X_train, X_test, y_train, y_test = train_test_split(projected_imgs, labels, stratify=labels, test_size=0.2,
+                                                        random_state=1234)
+    lr = LogisticRegressionCV(penalty='elasticnet', solver='saga',
+                              l1_ratios=[0, 0.2, 0.4, 0.6, 0.8, 1], max_iter=1000)
+    lr.fit(X_train, y_train)
+
+    print('making plots')
+    # regression weight plot
+    colors = [classes[0] if c > 0 else classes[1] for c in lr.coef_[0]]
+
+    regression_fig = px.bar(
+        x=concept_bank.concept_names, y=lr.coef_[0], color=colors,
+        color_discrete_sequence=['red', 'blue'],
+        labels=dict(x='Feature', y='Linear coefficient'),
+        title=f'Regression weights for classifying {classes}'
+    )
+
+    # ROC Curve
+    y_score = lr.predict_proba(X_test)[:, 1]
+    fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score)
+    score = metrics.auc(fpr, tpr)
+    roc_fig = px.area(
+        x=fpr, y=tpr,
+        title=f'ROC Curve (AUC={score:.4f}, Accuracy={lr.score(X_test, y_test):.4f})',
+        labels=dict(
+            x='False Positive Rate',
+            y='True Positive Rate'))
+    roc_fig.add_shape(
+        type='line', line=dict(dash='dash'),
+        x0=0, x1=1, y0=0, y1=1)
+
+    print(lr.score(X_test, y_test))
+
+    #TODO check whether saving images works, since 1000 max does not result in 1000
+    return regression_fig, roc_fig
 
 @app.callback(Output('model_layers', 'data'),
               [Input('model_selection', 'valid'),

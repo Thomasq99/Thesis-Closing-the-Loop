@@ -566,52 +566,6 @@ class ACE:
             self.concept_dict[bottleneck_layer]['concepts'].\
                 pop(self.concept_dict[bottleneck_layer]['concepts'].index(concept))
 
-    def _project_onto_concept(self, bottleneck: str, activations: np.ndarray, concept: str,
-                              randoms: List) -> np.ndarray:
-        """Transforms data points from activations space to concept space. The projection is normalized
-        by the squared L-2 norm of the corresponding CAV
-
-
-        @param bottleneck: Name of the bottleneck layer.
-        @param activations: Array of activation vectors of the data points in the bottleneck layer.
-        @param concept: Name of the concept to which concept's space the activations will be transformed.
-        @param randoms: List of random concept names against which the concept is trained. If there are 20 randoms.
-            there will be 20 CAVs (one for each random direction).
-        @return: The projection of activations of all images on all CAV directions of the given concept.
-            Resulting shape is (no_of_imgs, no_of_random_concepts).
-        """
-        #TODO add intercepts, vector operations
-        def t_func(rnd):
-            cav = CAV.load_cav(os.path.join(self.cav_dir, f'{bottleneck}-{concept}-{rnd}.pkl'))
-            return ((cav.cav @ activations.T) / cav.norm).reshape(-1)
-
-        if self.num_workers:
-            pool = multiprocessing.Pool(self.num_workers)
-            concept_projection = pool.map(lambda rnd: t_func(rnd), randoms)
-        else:
-            concept_projection = [t_func(rnd) for rnd in randoms]
-        return np.stack(concept_projection, axis=-1)
-
-    def project_onto_concept_space(self, bottleneck: str, images: np.ndarray, mean: bool = True) -> np.ndarray:
-        """Transforms images from pixel space to (L-2 squared normalized) concept space.
-
-        @param bottleneck: Name of the bottleneck layer.
-        @param images: Array containing the images to be transformed to concept space.
-        @param mean: If True, averages out the random directions. The concept space of each concept would be the
-            average inner product of all that concepts' CAV vectors rather than the stacked up version.
-        @return: The images projected onto the concept space of all concepts in the bottleneck layer.
-        """
-        concept_space = np.zeros((len(images), len(self.concept_dict[bottleneck]['concepts']),
-                                  self.num_random_concepts))
-        img_activations = get_activations_of_images(images, get_bottleneck_model(self.model, bottleneck))\
-            .reshape([len(images), -1])
-        randoms = ['random500_{}'.format(i) for i in range(self.num_random_concepts)]
-        for i, concept in enumerate(self.concept_dict[bottleneck]['concepts']):
-            concept_space[:, i, :] = self._project_onto_concept(bottleneck, img_activations, concept, randoms)
-        if mean:
-            concept_space = np.mean(concept_space, -1)
-        return concept_space  # TODO change to accommodate changed concepts from multiple to just one
-
     def aggregate_cavs(self, accuracies, mode='max'):
         randoms = ['random500_{}'.format(i) for i in range(self.num_random_concepts)]
         if mode == 'max':  # take maximum accuracy cav
