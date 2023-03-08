@@ -81,7 +81,7 @@ settings_menu = [
 
     dbc.Col(
         [
-            dbc.Label('Target Class:'),
+            dbc.Label('Target classes:'),
             dbc.Input(id='target_class', placeholder='e.g. toucan', type='text'),
             dbc.Label('Bottleneck layers:'),
             dbc.Input(id='bottlenecks', placeholder='e.g. mixed8, mixed3',
@@ -153,8 +153,8 @@ exploring_concept_space_tab_content = dbc.Container(
                 dbc.Col([dcc.Dropdown(id='choose_class', multi=True, className="dash-bootstrap",
                                       placeholder='Choose which classes to classify based on the concepts in the '
                                                   'concept bank'),
-                         dbc.InputGroup([dbc.Button("Start ph_CBM", id='start_ph_CBM', outline=True,
-                                                    color='primary', n_clicks=0),
+                         dbc.InputGroup([dbc.Button(dbc.Spinner(html.Div("Start ph_CBM", id='spinner_ph_CBM')),
+                                                    id='start_ph_CBM', outline=True, color='primary', n_clicks=0),
                                          dbc.Select(id='bottleneck_phCBM')])]
                         , width={"size": 9, "offset": 1})
             ]
@@ -200,7 +200,7 @@ app.layout = dbc.Container([html.H2('Closing the Concept Loop', style={'textAlig
               prevent_initial_call=True,
               manager=background_callback_manager)
 def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_filenames, model_name, path_to_source,
-                        path_to_working_dir, target_class, bottlenecks, stored_info, remove_concept_name):
+                        path_to_working_dir, target_classes, bottlenecks, stored_info, remove_concept_name):
 
     # get the id of the button that triggered the callback
     triggered_id = ctx.triggered_id
@@ -214,8 +214,14 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
     if triggered_id == 'start_ACE':  # automatically extract concepts
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        concept_bank_dct, classes, found_new = run_ACE(model_name, path_to_source, path_to_working_dir, target_class,
-                                                       bottlenecks, concept_bank_dct, classes)
+        target_classes = [target_class.strip() for target_class in target_classes.split(',')]
+        for target_class in target_classes:
+            bottlenecks_to_go_to_dct = [bn for bn in concept_bank_dct.keys() if isinstance(concept_bank_dct[bn],
+                                                                                           ConceptBank)]
+            if bottlenecks_to_go_to_dct:
+                concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in bottlenecks_to_go_to_dct}
+            concept_bank_dct, classes, found_new = run_ACE(model_name, path_to_source, path_to_working_dir,
+                                                           target_class, bottlenecks, concept_bank_dct, classes)
 
         # sort concept banks:
         if found_new:
@@ -344,7 +350,8 @@ def get_vis_phCBM_options(stored_info, data_path):
         return options_classes, bottleneck_options, bottleneck_options[0]['value']
 
 
-@app.callback([Output('weight_vis_CBM', 'figure'),
+@app.callback([Output('spinner_ph_CBM', 'children'),
+               Output('weight_vis_CBM', 'figure'),
                Output('ROC_vis_CBM', 'figure')],
               [Input('start_ph_CBM', 'n_clicks'),
                State('choose_class', 'value'),
@@ -372,7 +379,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     X_train, X_test, y_train, y_test = train_test_split(projected_imgs, labels, stratify=labels, test_size=0.2,
                                                         random_state=1234)
     lr = LogisticRegressionCV(penalty='elasticnet', solver='saga',
-                              l1_ratios=[0, 0.2, 0.4, 0.6, 0.8, 1], max_iter=1000)
+                              l1_ratios=[0, 0.2, 0.4, 0.6, 0.8, 1], max_iter=10000)
     lr.fit(X_train, y_train)
 
     print('making plots')
@@ -403,7 +410,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     print(lr.score(X_test, y_test))
 
     #TODO check whether saving images works, since 1000 max does not result in 1000
-    return regression_fig, roc_fig
+    return 'Start ph_CBM', regression_fig, roc_fig
 
 @app.callback(Output('model_layers', 'data'),
               [Input('model_selection', 'valid'),
@@ -454,16 +461,20 @@ def validate_model_selection(model_name):
 @app.callback([Output('target_class', 'valid'), Output('target_class', 'invalid')],
               [Input('target_class', 'value'),
                State('data_path', 'value'),
-               Input('data_path', 'valid')])
-def validate_class(target_class, data_path, data_path_validity):
-    if not data_path_validity:
+               Input('data_path', 'valid')],
+              prevent_initial_call=True)
+def validate_class(target_classes, data_path, data_path_validity):
+    if not data_path_validity or target_classes is None:
         return False, True
     else:
         target_class_lst = list(get_class_labels(data_path).keys())
-        if target_class in target_class_lst:
-            return True, False
-        else:
-            return False, True
+        target_classes = [target_class.strip() for target_class in target_classes.split(',')]
+
+        for target_class in target_classes:
+            if target_class not in target_class_lst:
+                return False, True
+
+        return True, False
 
 
 @app.callback([Output('bottlenecks', 'valid'), Output('bottlenecks', 'invalid')],
