@@ -39,7 +39,8 @@ concept_bank_menu = [
         dbc.InputGroup([
             dbc.Button("Remove concept", id='remove_concept_button', outline=True, color='primary', n_clicks=0,
                        disabled=True),
-            dbc.Select(id='remove_concept_select', disabled=True)
+            dcc.Dropdown(id='remove_concept_select', disabled=True, multi=True, className='dash-bootstrap',
+                         style={'width': '324px'})
         ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
         dcc.Upload(dbc.Button('Upload images to add concept', outline=True, color="primary", style={'width': '100%'}),
@@ -378,8 +379,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     print('training linear model to classify images based on concepts')
     X_train, X_test, y_train, y_test = train_test_split(projected_imgs, labels, stratify=labels, test_size=0.2,
                                                         random_state=1234)
-    lr = LogisticRegressionCV(penalty='elasticnet', solver='saga',
-                              l1_ratios=[0, 0.2, 0.4, 0.6, 0.8, 1], max_iter=10000)
+    lr = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=500)
     lr.fit(X_train, y_train)
 
     print('making plots')

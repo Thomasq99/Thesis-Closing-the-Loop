@@ -110,8 +110,6 @@ def run_ACE(model_name: str, path_to_source: str, path_to_working_dir: str, targ
     @return: Updated concept_bank, updated list of computed bottleneck, target_class combinations, True
     """
 
-    print(concept_bank_dct)
-
     # check which bottleneck, class combinations are loaded
     loaded_classes_temp = [stored.split(', ') for stored in loaded_classes]
     loaded_bottlenecks = [bottleneck for bottleneck, class_ in loaded_classes_temp if class_ == target_class]
