@@ -40,3 +40,26 @@ for i in range(10):
     plt.savefig(f'Questionnaire_images/imgs_{class_}.png', dpi=700)
 
 
+
+
+
+    # CNN
+    # model.compile(metrics=[tf.keras.metrics.Accuracy(), tf.keras.metrics.AUC()])
+    # class_to_id = concept_bank.class_id_dct
+    # y_test_CNN = np.zeros((y_test.shape[0], model.layers[-1].output_shape[-1]))
+    # def encode_label(y):
+    #     return class_to_id[classes[y]]
+    # label_encoded = map(encode_label, y_test)
+    # for idx, label in enumerate(label_encoded):
+    #     y_test_CNN[idx, label] = 1
+    #
+    # # score = model.evaluate(X_test, y_test_CNN)
+    # # print(score)
+    # preds = model.predict(X_test)
+    # print(preds)
+    #
+    # X_test_preprocessed = tf.keras.applications.inception_v3.preprocess_input(X_test*255)
+    # preds2 = model.predict(X_test_preprocessed)
+    #
+    # print(tf.keras.applications.inception_v3.decode_predictions(preds))
+    # print(tf.keras.applications.inception_v3.decode_predictions(preds2))

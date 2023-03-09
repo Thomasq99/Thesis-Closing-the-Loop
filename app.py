@@ -1,6 +1,8 @@
 import time
+
+import matplotlib.pyplot as plt
 from sklearn import metrics
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegressionCV
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
@@ -98,13 +100,6 @@ Concept_bank_tab_content = dbc.Container(
         dcc.Store(id='concept_bank'),
         dcc.Store(id='model_layers'),
 
-        # html.H3('Creating the Concepts', style={'textAlign': 'center'}),
-
-        # html.Div('''
-        # Creating the Concept Bank, Using ACE to automatically generate concepts.
-        # Using CAVs to represent concepts.
-        # ''', style={'textAlign': 'center'}),
-
         html.Br(),
 
         dbc.Container(
@@ -127,8 +122,7 @@ Concept_bank_tab_content = dbc.Container(
                                 html.H5('Visualization of Concepts', style={'textAlign': 'center'}),
                                 dbc.Spinner(dcc.Graph(figure=blank_fig(), id='cav_images',
                                                       style={'overflowY': 'scroll', 'overflowX': 'scroll',
-                                                             'width': '64vw',
-                                                             'height': '70vh'})),
+                                                             'width': '64vw', 'height': '70vh'})),
                                 dbc.InputGroup([
                                     dbc.Button('Update Concept Visualization', id='create_fig_button', outline=True,
                                                color='primary', n_clicks=0, disabled=True),
@@ -140,32 +134,59 @@ Concept_bank_tab_content = dbc.Container(
             ], fluid=True)
     ], fluid=True)
 
-exploring_concept_space_tab_content = dbc.Container(
+ph_CBM_tab_content = dbc.Container(
     [
         dbc.Row(
             [
-                dbc.Col([dcc.Graph(figure=blank_fig(), id='weight_vis_CBM')], width={"size": 4, "offset": 1}),
-                dbc.Col([dcc.Graph(figure=blank_fig(), id='ROC_vis_CBM')], width={"size": 4, "offset": 1}),
-            ]
-        ),
+                dbc.Col(
+                    [
+                        dbc.Row([
+                            html.H5('ph_CBM settings', style={'text-align': 'center', 'margin-bottom': '15px',
+                                                              'margin-top': '15px'}),
+                            dbc.Label('Classes to include for classification:'),
+                            dcc.Dropdown(id='choose_class', multi=True, className="dash-bootstrap",
+                                         placeholder='Classes to classify'),
+                            dbc.InputGroup([dbc.Button(dbc.Spinner(html.Div("Start ph_CBM", id='spinner_ph_CBM')),
+                                                       id='start_ph_CBM', outline=True, color='primary', n_clicks=0),
+                                            dbc.Select(id='bottleneck_phCBM')])
+                             ], class_name='h-50'),
 
-        dbc.Row(
-            [
-                dbc.Col([dcc.Dropdown(id='choose_class', multi=True, className="dash-bootstrap",
-                                      placeholder='Choose which classes to classify based on the concepts in the '
-                                                  'concept bank'),
-                         dbc.InputGroup([dbc.Button(dbc.Spinner(html.Div("Start ph_CBM", id='spinner_ph_CBM')),
-                                                    id='start_ph_CBM', outline=True, color='primary', n_clicks=0),
-                                         dbc.Select(id='bottleneck_phCBM')])]
-                        , width={"size": 9, "offset": 1})
+                        dbc.Row([
+                            html.H5('ph_CBM results', style={'text-align': 'center', 'margin-bottom': '15px',
+                                                             'margin-top': '15px'}),
+                            html.Div("Linear Model Accuracy = NaN \t CNN Accuracy = NaN", id='accuracy'),
+                            html.Div('Linear Model AUC = NaN \t CNN AUC = NaN'),
+                            dbc.Button('Remove concepts with weight = 0', id='remove_concepts_weight_0', outline=True,
+                                       color='primary', n_clicks=0),
+                            dbc.Button("Save linear model", id='save_linear_model_button', outline=True,
+                                       color='primary', n_clicks=0),
+
+
+                        ], class_name='h-50')
+                    ], width=3),
+
+                dbc.Col([
+                    dbc.Row(html.H5('Visualization of ph_CBM regression', style={'textAlign': 'center'})),
+                    dbc.Row([dbc.Col(dcc.Graph(figure=blank_fig(), id='weight_vis_CBM',
+                                               style={'overflowY': 'scroll', 'overflowX': 'scroll', 'height': '70vh'}),
+                                     width=6),
+                             dbc.Col(dcc.Graph(figure=blank_fig(), id='marginal_utility_vis_CBM',
+                                               style={'overflowY': 'scroll', 'overflowX': 'scroll', 'height': '70vh'}),
+                                     width=6)])
+
+
+
+                ], width=9)
             ]
         )
+
     ], fluid=True)
+
 
 tabs = dbc.Tabs(
     [
         dbc.Tab(Concept_bank_tab_content, label='Concept Bank'),
-        dbc.Tab(exploring_concept_space_tab_content, label='post-hoc CBM')
+        dbc.Tab(ph_CBM_tab_content, label='post-hoc CBM')
     ]
 )
 
@@ -353,7 +374,7 @@ def get_vis_phCBM_options(stored_info, data_path):
 
 @app.callback([Output('spinner_ph_CBM', 'children'),
                Output('weight_vis_CBM', 'figure'),
-               Output('ROC_vis_CBM', 'figure')],
+               Output('marginal_utility_vis_CBM', 'figure')],
               [Input('start_ph_CBM', 'n_clicks'),
                State('choose_class', 'value'),
                State('concept_bank', 'data'),
@@ -374,13 +395,20 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
         images.append(load_images_from_files(filenames, max_imgs=1000))
         labels.extend([idx]*len(filenames))
     images_arr = np.concatenate(images, axis=0)
+
     projected_imgs = concept_bank.project_onto_conceptspace(images_arr)
+    labels = np.array(labels)
 
     print('training linear model to classify images based on concepts')
-    X_train, X_test, y_train, y_test = train_test_split(projected_imgs, labels, stratify=labels, test_size=0.2,
-                                                        random_state=1234)
+
+    sss = StratifiedShuffleSplit(n_splits=1, test_size=0.2, random_state=1234)
+    train_index, test_index = next(sss.split(images_arr, labels))
+
+    X_train_proj, X_test_proj = projected_imgs[train_index], projected_imgs[test_index]
+    y_train, y_test = labels[train_index], labels[test_index]
+
     lr = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=500)
-    lr.fit(X_train, y_train)
+    lr.fit(X_train_proj, y_train)
 
     print('making plots')
     # regression weight plot
@@ -393,24 +421,28 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
         title=f'Regression weights for classifying {classes}'
     )
 
-    # ROC Curve
-    y_score = lr.predict_proba(X_test)[:, 1]
+    # accuracy and AUC scores
+    # Linear Model
+    y_score = lr.predict_proba(X_test_proj)[:, 1]
+    y_hat = lr.predict(X_test_proj)
     fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score)
-    score = metrics.auc(fpr, tpr)
-    roc_fig = px.area(
-        x=fpr, y=tpr,
-        title=f'ROC Curve (AUC={score:.4f}, Accuracy={lr.score(X_test, y_test):.4f})',
-        labels=dict(
-            x='False Positive Rate',
-            y='True Positive Rate'))
-    roc_fig.add_shape(
-        type='line', line=dict(dash='dash'),
-        x0=0, x1=1, y0=0, y1=1)
+    lm_score = metrics.auc(fpr, tpr)
+    lm_accuracy = metrics.accuracy_score(y_test, y_hat)
 
-    print(lr.score(X_test, y_test))
+    # Compute accuracy gain per concept:
+    accuracy_gain = []
+    for idx, concept_name in enumerate(concept_bank.concept_names):
+        X_train_proj_concept, X_test_proj_concept = np.delete(X_train_proj, idx, 1), np.delete(X_test_proj, idx, 1)
+        lr_concept = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=500)
+        lr_concept.fit(X_train_proj_concept, y_train)
+        y_hat_concept = lr_concept.predict(X_test_proj_concept)
+        acc_gain = lm_accuracy - metrics.accuracy_score(y_test, y_hat_concept)
+        accuracy_gain.append(acc_gain)
 
-    #TODO check whether saving images works, since 1000 max does not result in 1000
-    return 'Start ph_CBM', regression_fig, roc_fig
+    acc_gain_fig = px.bar(x=concept_bank.concept_names, y=accuracy_gain)
+
+    return 'Start ph_CBM', regression_fig, acc_gain_fig
+
 
 @app.callback(Output('model_layers', 'data'),
               [Input('model_selection', 'valid'),
