@@ -78,7 +78,7 @@ settings_menu = [
             dbc.Label('Model selection:'),
             dbc.Input(value='InceptionV3', id='model_selection', type='text', required=True),
             dbc.Label('Data directory:'),
-            dbc.Input(value='./data/ACE_ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
+            dbc.Input(value='./data/ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
                       type='text')
         ], width=6),
 
@@ -526,4 +526,4 @@ def validate_bottlenecks(bottlenecks, stored_model_layers):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=False)
+    app.run_server(debug=True)

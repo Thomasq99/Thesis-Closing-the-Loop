@@ -1,7 +1,9 @@
+import random
+
 from Concepts.ACE import ACE
 import os
 import shutil
-from Concepts.helper import ace_create_source_dir_imagenet, save_concepts, save_images, load_images_from_files, \
+from Concepts.helper import save_concepts, save_images, load_images_from_files, \
     get_activations_of_images, get_bottleneck_model
 from Concepts.ConceptBank import ConceptBank
 # TODO in the end remove ace_create_source_dir_imagenet
@@ -59,6 +61,33 @@ def prepare_output_directories(working_dir: str, target_class: str, bottlenecks:
     return activations_dir, cavs_dir, discovered_concepts_dir
 
 
+def prepare_data(data_folder, num_random_concepts=20):
+    # TODO REFACTOR THIS DCT
+    with open('data/ImageNet/imagenet_class_index.json') as file:
+        dct = json.load(file)
+
+    class_to_id = {}
+    id_to_folder = {}
+    for key, value in dct.items():
+        id_to_folder[int(key)] = value[0]
+        class_to_id[value[1]] = int(key)
+
+    classes = [value[0] for value in dct.values()]
+    # make random concepts:
+    for i in range(num_random_concepts):
+        folder_name = os.path.join(data_folder, f'random_500_{i}')
+
+        if not os.path.exists(folder_name):
+            os.makedirs(folder_name)
+            chosen_class_folders = random.choices(classes, k=500)
+            filenames = [os.path.join(data_folder, class_folder,
+                                      random.choice(os.listdir(os.path.join(data_folder, class_folder))))
+                         for class_folder in chosen_class_folders]
+            for file in filenames:
+                shutil.copyfile(file, os.path.join(folder_name, os.path.basename(file)))
+    return class_to_id, id_to_folder
+
+
 def prepare_ACE(model_name: str, source_data: str, working_dir: str, target_class: str, bottlenecks: List,
                 overwrite: bool = False) -> Tuple[str, 'ACE']:
     """ Prepares directories and data necessary for running ACE. Also initializes an ACE object
@@ -75,18 +104,13 @@ def prepare_ACE(model_name: str, source_data: str, working_dir: str, target_clas
     # Create and, if wanted, clear necessary directories
     activations_dir, cavs_dir, discovered_concepts_dir = prepare_output_directories(working_dir, target_class,
                                                                                     bottlenecks, overwrite)
-    # TODO REMOVE IN THE END.
-    # TODO add default folder structure and function to extract class_to_id from it
+
     # IMPORTANT prepare data to the right format. Change this function for your own use.
-    if 'ImageNet' in source_data:
-        print('Dealing with ImageNet')
-        class_to_id = ace_create_source_dir_imagenet('./data/ImageNet', source_data, target_class,
-                                                     num_random_concepts=20, ow=False)
-    print('data prepared')
+    class_to_id, id_to_folder = prepare_data(data_folder=source_data, num_random_concepts=20)
 
     # initialize ACE
     ace = ACE(model_name, bottlenecks, target_class, source_data, working_dir, 'random_discovery',
-              class_to_id, num_random_concepts=20, num_workers=30)
+              class_to_id, id_to_folder= id_to_folder, num_random_concepts=20, num_workers=30)
 
     return discovered_concepts_dir, ace
 

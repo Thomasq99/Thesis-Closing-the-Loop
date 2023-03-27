@@ -41,7 +41,7 @@ class ACE:
     """
     # TODO add work for grey scale images
     def __init__(self, model_name: str, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
-                 random_concept: str, class_to_id: Dict, average_image_value: int = 117, num_workers: int = 0,
+                 random_concept: str, class_to_id: Dict, id_to_folder: Dict, average_image_value: int = 117, num_workers: int = 0,
                  channel_mean: bool = True, max_imgs: int = 40, min_imgs: int = 20, num_random_concepts: int = 20,
                  num_discovery_imgs=40) -> None:
         """Runs concept discovery algorithm. For more information see ACE docstring.
@@ -53,6 +53,7 @@ class ACE:
         @param random_concept: Name of the random_concept (used for statistical testing).
         @param class_to_id: Dictionary mapping the string representations to the integer representations
             for all classes.
+        @param id_to_folder: Dictionary mapping the class IDs to the folder names
         @param average_image_value: An integer representing the average pixel value. Used for padding.
         @param num_workers: the number of worker threads to run in parallel.
         @param channel_mean: A boolean indicating whether to average out activations
@@ -74,6 +75,7 @@ class ACE:
         self.source_dir = source_dir
         self.random_concept = random_concept
         self.class_to_id = class_to_id
+        self.id_to_folder = id_to_folder
         self.average_image_value = average_image_value  # 117 is default zero value for Inception V3
         self.image_shape = self.model.input.shape[1:3][::-1]  # retrieve image shape from the model as (width, height)
         self.num_workers = num_workers
@@ -100,7 +102,7 @@ class ACE:
         @param int max_imgs: The amount of images of the concept or class to return.
         @return Images of the desired concept or class.
         """
-        concept_dir = os.path.join(self.source_dir, concept)
+        concept_dir = os.path.join(self.source_dir, self.id_to_folder[self.class_to_id[concept]])
         img_paths = [
             os.path.join(concept_dir, img)
             for img in os.listdir(concept_dir)
