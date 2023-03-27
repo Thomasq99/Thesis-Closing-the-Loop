@@ -222,7 +222,7 @@ app.layout = dbc.Container([html.H2('Closing the Concept Loop', style={'textAlig
               prevent_initial_call=True,
               manager=background_callback_manager)
 def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_filenames, model_name, path_to_source,
-                        path_to_working_dir, target_classes, bottlenecks, stored_info, remove_concept_name):
+                        path_to_working_dir, target_classes, bottlenecks, stored_info, remove_concept_list):
 
     # get the id of the button that triggered the callback
     triggered_id = ctx.triggered_id
@@ -269,12 +269,15 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
 
     elif triggered_id == 'remove_concept_button':
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        bottleneck, concept_name = remove_concept_name.split(', ')
 
         # load concept bank
         concept_bank_dct = {bn: ConceptBank(concept_bank_dct[bn]) for bn in concept_bank_dct.keys()}
+
         # remove concept
-        concept_bank_dct[bottleneck].remove_concept(concept_name)
+        for i in range(len(remove_concept_list)):
+            bottleneck, concept_name = remove_concept_list[i].split(', ')
+            concept_bank_dct[bottleneck].remove_concept(concept_name)
+
         # extract concept bank
         concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in concept_bank_dct.keys()}
 
@@ -523,4 +526,4 @@ def validate_bottlenecks(bottlenecks, stored_model_layers):
 
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
