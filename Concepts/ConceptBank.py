@@ -83,13 +83,12 @@ class ConceptBank:
         @param discovery_images: Dictionary containing an array of discovery images for each class.
             format is {concept_class_name: img_array}
         """
-
         # split user defined concepts from automatically extracted concepts
         concept_names_ACE = [concept for concept in self.concept_names if 'userDefined' not in concept]
         concept_names_user_defined = [concept for concept in self.concept_names if 'userDefined' in concept]
 
         # For the discovered concepts get the classes for which they were discovered
-        concept_classes = np.array([concept.split('_')[0] for concept in concept_names_ACE])
+        concept_classes = np.array([concept.split('__')[0] for concept in concept_names_ACE])
 
         # load images if discovery_images is not supplied
         if discovery_images is None:
@@ -154,9 +153,9 @@ class ConceptBank:
         concepts_dict = {'concepts': concept_names}
 
         # get paths to images and patches
-        image_paths = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept)
+        image_paths = [os.path.join(concept_dir, concept.split("__")[0], self.bottleneck, concept)
                        for concept in concept_names]
-        patch_paths = [os.path.join(concept_dir, concept.split("_")[0], self.bottleneck, concept + '_patches')
+        patch_paths = [os.path.join(concept_dir, concept.split("__")[0], self.bottleneck, concept + '_patches')
                         for concept in concept_names]
 
         for i in range(len(concept_names)):
@@ -256,17 +255,17 @@ class ConceptBank:
 
         j = 1
         discovery_images_dct = {}
-        for class_ in {name.split('_')[0] for name in concept_names_ACE}:
+        for class_ in {name.split('__')[0] for name in concept_names_ACE}:
             image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
             discovery_images_dct[class_] = load_images_from_files([os.path.join(image_dir, file)
                                                                    for file in os.listdir(image_dir)],
                                                                   shape=shape, do_shuffle=False)
         if concept_names_ACE:
-            current_class = concept_names_ACE[0].split('_')[0]
+            current_class = concept_names_ACE[0].split('__')[0]
             discovery_images = discovery_images_dct[current_class]
             for concept in concept_names_ACE:
                 if concept.split('_')[0] != current_class:
-                    current_class = concept.split('_')[0]
+                    current_class = concept.split('__')[0]
                     discovery_images = discovery_images_dct[current_class]
                 # TODO add support for different modes
                 concept_images = concepts_dct_ACE[concept]['images']

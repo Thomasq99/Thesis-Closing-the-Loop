@@ -74,8 +74,8 @@ def prepare_data(data_folder, num_random_concepts=20):
 
     classes = [value[0] for value in dct.values()]
     # make random concepts:
-    for i in range(num_random_concepts):
-        folder_name = os.path.join(data_folder, f'random_500_{i}')
+    for folder in (['random_discovery'] + [f'random500_{i}' for i in range(num_random_concepts)]):
+        folder_name = os.path.join(data_folder, folder)
 
         if not os.path.exists(folder_name):
             os.makedirs(folder_name)

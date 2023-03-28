@@ -102,7 +102,10 @@ class ACE:
         @param int max_imgs: The amount of images of the concept or class to return.
         @return Images of the desired concept or class.
         """
-        concept_dir = os.path.join(self.source_dir, self.id_to_folder[self.class_to_id[concept]])
+        if 'random' in concept:
+            concept_dir = os.path.join(self.source_dir, concept)
+        else:
+            concept_dir = os.path.join(self.source_dir, self.id_to_folder[self.class_to_id[concept]])
         img_paths = [
             os.path.join(concept_dir, img)
             for img in os.listdir(concept_dir)
@@ -422,7 +425,7 @@ class ACE:
                     cond3 = non_common_concept and highly_populated_concept
                     if highly_common_concept or cond2 or cond3:  # filter out unimportant concepts
                         concept_number += 1
-                        concept = '{}_concept{}'.format(self.target_class, concept_number)
+                        concept = '{}__concept{}'.format(self.target_class, concept_number)
                         bn_dic['concepts'].append(concept)
                         bn_dic[concept] = {
                             'images': self.dataset[concept_idxs],
