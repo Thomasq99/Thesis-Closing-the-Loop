@@ -1,6 +1,4 @@
 import time
-
-import matplotlib.pyplot as plt
 from sklearn import metrics
 from sklearn.model_selection import StratifiedShuffleSplit
 from sklearn.linear_model import LogisticRegressionCV
@@ -265,7 +263,8 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
                remove_options, False, False, False, False
 
     elif triggered_id == 'clear_concept_bank':  # clear current concept bank
-        return 'Automatically extract concepts', None, False, None, None, None, True, True, True, True
+        return 'Automatically extract concepts', None, False, dash.no_update, None, dash.no_update, True, \
+               True, True, True
 
     elif triggered_id == 'remove_concept_button':
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
@@ -312,7 +311,6 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
         remove_options = get_sessions_concepts(concept_bank_dct)
         bottleneck_options = get_sessions_bottlenecks(concept_bank_dct)
         stored_info = {'concept_bank_dct': concept_bank_dct, 'classes': classes}
-
         return 'Automatically extract concepts', stored_info, False, bottleneck_options, bottlenecks[0], \
                remove_options, False, False, False, False
 
@@ -342,7 +340,7 @@ def save_concept_bank(b1, stored_info):
 @app.callback([Output('cav_images', 'figure'),
                Output('create_fig_button', 'n_clicks')],
               [Input('create_fig_button', 'n_clicks'),
-               Input('bottleneck_dropdown_cav_images', 'value'),
+               State('bottleneck_dropdown_cav_images', 'value'),
                State('concept_bank', 'data')],
               running=[(Output('bottleneck_dropdown_cav_images', 'disabled'), True, False)],
               prevent_initial_call=True)
@@ -359,20 +357,21 @@ def create_figure(n_clicks, bottleneck, stored_info):
         raise dash.exceptions.PreventUpdate()
 
 
-@app.callback([Output('choose_class', 'options'),
+@app.callback([Output('start_ph_CBM', 'disabled'),
+               Output('choose_class', 'options'),
                Output('bottleneck_phCBM', 'options'),
                Output('bottleneck_phCBM', 'value')],
               [Input('concept_bank', 'data'),
-              State('data_path', 'value')], prevent_initial_call=True)
+               State('data_path', 'value')], prevent_initial_call=True)
 def get_vis_phCBM_options(stored_info, data_path):
     if stored_info is None:
-        return None, None, None
+        return True, dash.no_update, dash.no_update, dash.no_update
     else:
         concept_bank_dct = stored_info['concept_bank_dct']
         bottleneck_options = get_sessions_bottlenecks(concept_bank_dct)
         classes = list(get_class_labels(data_path).keys())
         options_classes = [{'label': class_, 'value': class_} for class_ in classes]
-        return options_classes, bottleneck_options, bottleneck_options[0]['value']
+        return False, options_classes, bottleneck_options, bottleneck_options[0]['value']
 
 
 @app.callback([Output('spinner_ph_CBM', 'children'),
