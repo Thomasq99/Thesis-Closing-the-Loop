@@ -62,8 +62,7 @@ def prepare_output_directories(working_dir: str, target_class: str, bottlenecks:
 
 
 def prepare_data(data_folder, num_random_concepts=20):
-    # TODO REFACTOR THIS DCT
-    with open('data/ImageNet/imagenet_class_index.json') as file:
+    with open(os.path.join(data_folder, 'class_index.json')) as file:
         dct = json.load(file)
 
     class_to_id = {}
@@ -375,7 +374,7 @@ def get_class_labels(data_folder_path: str):
     @param data_folder_path: path to the data folder
     @return: dictionary mapping classes to the id's
     """
-    with open(os.path.join(data_folder_path, 'imagenet_class_index.json')) as jsonFile:
+    with open(os.path.join(data_folder_path, 'class_index.json')) as jsonFile:
         imagenet_dct = json.load(jsonFile)
         jsonFile.close()
 

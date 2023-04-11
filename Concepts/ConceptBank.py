@@ -7,8 +7,6 @@ from plotly.subplots import make_subplots
 from skimage.segmentation import mark_boundaries
 import numpy as np
 import plotly.graph_objects as go
-import matplotlib.gridspec as gridspec
-import matplotlib.pyplot as plt
 import tensorflow as tf
 
 
@@ -267,7 +265,6 @@ class ConceptBank:
                 if concept.split('_')[0] != current_class:
                     current_class = concept.split('__')[0]
                     discovery_images = discovery_images_dct[current_class]
-                # TODO add support for different modes
                 concept_images = concepts_dct_ACE[concept]['images']
                 concept_patches = concepts_dct_ACE[concept]['patches']
                 concept_image_numbers = concepts_dct_ACE[concept]['image_numbers']
@@ -313,59 +310,49 @@ class ConceptBank:
             self.concepts = None
         return fig
 
-    def plot_concepts_plt(self, num_images, shape=(60, 60)):
-        if not self.in_memory:
-            self.load_in_memory()
-            self.in_memory = False
+    def plot_concept(self, concept_name, num_images, shape):
 
-        concepts_dct = self.load_concept_imgs(num_images, shape)
-        num_concepts = len(self.concept_names)
-        plt.rcParams['figure.figsize'] = num_images * 2.1, 4.3 * num_concepts
-        fig = plt.figure(figsize=(num_images * 2, 4 * num_concepts))
-        outer = gridspec.GridSpec(num_concepts, 1, wspace=0., hspace=0.3)
-
-        discovery_images_dct = {}
-        for class_ in {name.split('_')[0] for name in self.concept_names}:
+        if 'userDefined' not in concept_name:
+            fig = make_subplots(2, num_images, shared_xaxes=True, shared_yaxes=True)
+            concepts_dct = self.load_concept_imgs_ace([concept_name], num_images, shape=shape)
+            class_ = concept_name.split('__')[0]
             image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
-            discovery_images_dct[class_] = load_images_from_files([os.path.join(image_dir, file)
-                                                                   for file in os.listdir(image_dir)],
-                                                                  shape=shape, do_shuffle=False)
-        current_class = self.concept_names[0].split('_')[0]
-        discovery_images = discovery_images_dct[current_class]
+            discovery_images = load_images_from_files([os.path.join(image_dir, file) for file in os.listdir(image_dir)],
+                                                      shape=shape, do_shuffle=False)
 
-        for n, concept in enumerate(self.concept_names):
-            if concept.split('_')[0] != current_class:
-                current_class = concept.split('_')[0]
-                discovery_images = discovery_images_dct[current_class]
-            inner = gridspec.GridSpecFromSubplotSpec(2, num_images, subplot_spec=outer[n], wspace=0, hspace=0.1)
-            concept_images = concepts_dct[concept]['images']
-            concept_patches = concepts_dct[concept]['patches']
-            concept_image_numbers = concepts_dct[concept]['image_numbers']
+            concept_images = concepts_dct[concept_name]['images']
+            concept_patches = concepts_dct[concept_name]['patches']
+            concept_image_numbers = concepts_dct[concept_name]['image_numbers']
             idxs = np.arange(len(concept_images))[:num_images]
             for i, idx in enumerate(idxs):
-                ax = plt.Subplot(fig, inner[i])
+                image = np.uint8(concept_images[idx] * 255)
+                mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255, -1) == 1)  # 117, default avg for inception
+                annotated_image = discovery_images[concept_image_numbers[idx]]
+                annotated_image = np.uint8(mark_boundaries(annotated_image, mask, color=(1, 1, 0), mode='thick') * 255)
+                fig.add_trace(go.Image(z=image, hoverinfo='none'), 1, i + 1)
+                fig.add_trace(go.Image(z=annotated_image, hoverinfo='none'), 2, i + 1)
 
-                img = np.uint8(concept_images[idx] * 255)
-                ax.imshow(img)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                if i == num_images // 2:
-                    ax.set_title(concept)
-                ax.grid(False)
-                fig.add_subplot(ax)
-                ax = plt.Subplot(fig, inner[i + num_images])
-                mask = 1 - (np.mean(concept_patches[idxs[i]] == float(117) / 255,
-                                    -1) == 1)  # hard coded 117, default avg for inception
-                image = discovery_images[concept_image_numbers[idx]]
-                image = np.uint8(mark_boundaries(image, mask, color=(1, 1, 0), mode='thick') * 255)
-                ax.imshow(image)
-                ax.set_xticks([])
-                ax.set_yticks([])
-                ax.set_title(str(concept_image_numbers[idx]))
-                ax.grid(False)
-                fig.add_subplot(ax)
-        plt.suptitle(self.bottleneck)
+            fig.update_layout(autosize=True,
+                              width=(num_images-1) * 200,
+                              height=2 * 200,
+                              margin=dict(l=20, r=20, b=20, t=50),
+                              overwrite=True)
+        else:
+            fig = make_subplots(1, num_images, shared_xaxes=True, shared_yaxes=True)
+            concepts_dct = self.load_concept_imgs_userDefined([concept_name], num_images, shape=shape)
+            concept_images = concepts_dct[concept_name]
+            idxs = np.arange(len(concept_images))[:num_images]
+            for i, idx in enumerate(idxs):
+                image = np.uint8(concept_images[idx]*255)
+                fig.add_trace(go.Image(z=image, hoverinfo='none'), 1, i + 1)
 
-        if not self.in_memory:
-            self.concepts = None
+            fig.update_layout(autosize=True,
+                              width=(num_images-1) * 200,
+                              height=1 * 200,
+                              margin=dict(l=20, r=20, b=20, t=50),
+                              overwrite=True)
+
+        fig.update_xaxes(showgrid=False, showticklabels=False, zeroline=False)
+        fig.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
+
         return fig

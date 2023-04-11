@@ -73,7 +73,7 @@ class CAV:
         X_train, X_test, y_train, y_test = train_test_split(acts, labels, test_size=0.25, stratify=labels)
 
         # compute CAV
-        svm = LinearSVC()
+        svm = LinearSVC(max_iter=2000)
         svm.fit(X_train, y_train)
         self.accuracy = svm.score(X_test, y_test)
         self.cav = svm.coef_[0].reshape(1, -1)

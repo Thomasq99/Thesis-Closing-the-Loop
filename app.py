@@ -18,6 +18,7 @@ import base64
 import io
 import numpy as np
 import plotly.express as px
+import json
 
 MAX_ROWS_CONCEPT_VIS = 60
 SHAPE_IMGS_CONCEPT_VIS = (60, 60)
@@ -76,7 +77,7 @@ settings_menu = [
             dbc.Label('Model selection:'),
             dbc.Input(value='InceptionV3', id='model_selection', type='text', required=True),
             dbc.Label('Data directory:'),
-            dbc.Input(value='./data/ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
+            dbc.Input(value='../../data/ImageNet', id='data_path', placeholder='Path to source_dir or np.array',
                       type='text')
         ], width=6),
 
@@ -267,6 +268,8 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
                True, True, True
 
     elif triggered_id == 'remove_concept_button':
+        if remove_concept_list is None:
+            raise dash.exceptions.PreventUpdate
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
 
         # load concept bank
@@ -385,6 +388,16 @@ def get_vis_phCBM_options(stored_info, data_path):
               prevent_initial_call=True)
 def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
 
+    # get class_to_id and id_to_folder dictionaries
+    with open(os.path.join(data_path, 'class_index.json')) as file:
+        dct = json.load(file)
+
+    class_to_id = {}
+    id_to_folder = {}
+    for key, value in dct.items():
+        id_to_folder[int(key)] = value[0]
+        class_to_id[value[1]] = int(key)
+
     print('Projecting images onto concept subspace')
     concept_bank_dct = stored_info['concept_bank_dct']
     concept_bank = ConceptBank(concept_bank_dct[bottleneck])
@@ -392,11 +405,12 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     images = []
     labels = []
     for idx, class_ in enumerate(classes):
-        filenames = [os.path.join(data_path, class_, filename) for filename in
-                     os.listdir(os.path.join(data_path, class_))]
-        images.append(load_images_from_files(filenames, max_imgs=1000))
+        filenames = [os.path.join(data_path, id_to_folder[class_to_id[class_]], filename) for filename in
+                     os.listdir(os.path.join(data_path, id_to_folder[class_to_id[class_]]))]
+        images.append(load_images_from_files(filenames, max_imgs=1500))
         labels.extend([idx]*len(filenames))
     images_arr = np.concatenate(images, axis=0)
+    print(images_arr.shape)
 
     projected_imgs = concept_bank.project_onto_conceptspace(images_arr)
     labels = np.array(labels)
@@ -409,7 +423,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     X_train_proj, X_test_proj = projected_imgs[train_index], projected_imgs[test_index]
     y_train, y_test = labels[train_index], labels[test_index]
 
-    lr = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=500)
+    lr = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=2000)
     lr.fit(X_train_proj, y_train)
 
     print('making plots')
@@ -430,20 +444,22 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score)
     lm_score = metrics.auc(fpr, tpr)
     lm_accuracy = metrics.accuracy_score(y_test, y_hat)
+    print(lm_score)
+    print(lm_accuracy)
 
-    # Compute accuracy gain per concept:
-    accuracy_gain = []
-    for idx, concept_name in enumerate(concept_bank.concept_names):
-        X_train_proj_concept, X_test_proj_concept = np.delete(X_train_proj, idx, 1), np.delete(X_test_proj, idx, 1)
-        lr_concept = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=500)
-        lr_concept.fit(X_train_proj_concept, y_train)
-        y_hat_concept = lr_concept.predict(X_test_proj_concept)
-        acc_gain = lm_accuracy - metrics.accuracy_score(y_test, y_hat_concept)
-        accuracy_gain.append(acc_gain)
+    # # Compute accuracy gain per concept:
+    # accuracy_gain = []
+    # for idx, concept_name in enumerate(concept_bank.concept_names):
+    #     X_train_proj_concept, X_test_proj_concept = np.delete(X_train_proj, idx, 1), np.delete(X_test_proj, idx, 1)
+    #     lr_concept = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=1000)
+    #     lr_concept.fit(X_train_proj_concept, y_train)
+    #     y_hat_concept = lr_concept.predict(X_test_proj_concept)
+    #     acc_gain = lm_accuracy - metrics.accuracy_score(y_test, y_hat_concept)
+    #     accuracy_gain.append(acc_gain)
+    #
+    # acc_gain_fig = px.bar(x=concept_bank.concept_names, y=accuracy_gain)
 
-    acc_gain_fig = px.bar(x=concept_bank.concept_names, y=accuracy_gain)
-
-    return 'Start ph_CBM', regression_fig, acc_gain_fig
+    return 'Start ph_CBM', regression_fig, blank_fig()
 
 
 @app.callback(Output('model_layers', 'data'),

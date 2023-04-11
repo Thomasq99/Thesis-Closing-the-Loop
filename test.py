@@ -1,65 +1,58 @@
+# import pickle as p
+# from Concepts.ConceptBank import ConceptBank
+# import matplotlib.pyplot as plt
+# import os
+#
+# from Concepts.helper import load_images_from_files
+#
+# with open('saved_concept_bank.pkl', 'rb') as file:
+#     concept_bank = p.load(file)
+#
+# CB = ConceptBank(concept_bank['concept_bank_dct']['mixed8'])
+#
+# fig = CB.plot_concept('userDefined_africanEar2.jpg', num_images=5, shape=(90, 90))
+# fig.show()
+# #
+# # fig = CB.plot_concept('userDefined_africanEar1.jpg', num_images=5, shape=(90, 90))
+# # fig.show()
+# #
+# # fig = CB.plot_concept('userDefined_trunk1.jpg', num_images=5, shape=(90, 90))
+# # fig.show()
+# #
+# # fig = CB.plot_concept('userDefined_tusk1.jpg', num_images=5, shape=(90, 90))
+# # fig.show()
+# #
+# # fig = CB.plot_concept('African_elephant__concept13', num_images=5, shape=(90, 90))
+# # fig.show()
+# #
+# # fig = CB.plot_concept('African_elephant__concept5', num_images=5, shape=(90, 90))
+# # fig.show()
+#
+# # class_folder = './questionnaire/indian_ear'
+# # img_filenames = [os.path.join(class_folder, filename) for filename in os.listdir(class_folder)]
+# # imgs = load_images_from_files(filenames=img_filenames, max_imgs=20, num_workers=1)[:5]
+# # fig, axs = plt.subplots(1, 5)
+# # axs = axs.flatten()
+# # for idx, img, ax in zip(range(5), imgs, axs):
+# #     ax.imshow(img)
+# #     ax.axis('off')
+# # fig.tight_layout()
+# # fig.savefig(fname=f'subset_images/images_indian_ear.png', dpi=400)
+
 import os
-from Concepts.helper import load_images_from_files
-import matplotlib.pyplot as plt
-import random
-import json
-import numpy as np
+import tarfile
 
-with open('./data/ImageNet/Labels.json') as file:
-    dct = json.load(file)
+tarfiles = os.listdir('data/ImageNet2')
+tarfiles = [os.path.join('data/ImageNet2', file) for file in tarfiles]
 
-chosen_classes = random.sample(list(dct.keys()), k=10)
+for file in tarfiles:
+    # Open the .tar file
+    tar = tarfile.open(file, "r")
 
-images = np.zeros((10, 5, 299, 299, 3))
+    # Extract all the contents of the .tar file to a directory
+    tar.extractall(path=f'{file.rstrip(".tar")}/')
 
-for idx, class_ in enumerate(chosen_classes):
-    train_folders = ['train.X1', 'train.X2', 'train.X3', 'train.X4']
-    for folder in train_folders:
-        if class_ in os.listdir(os.path.join('data/ImageNet', folder)):
+    # Close the .tar file
+    tar.close()
 
-            imgs_class_ = load_images_from_files([os.path.join('data/ImageNet', folder, class_, file) for file in
-                                                  os.listdir(os.path.join('data/ImageNet', folder, class_))],
-                                                 max_imgs=5, do_shuffle=True)
-            images[idx] = imgs_class_
-            break
-
-fig, axs = plt.subplots(10, 5)
-
-for i in range(10):
-    imgs = images[i]
-    class_ = dct[chosen_classes[i]].split(',')[0]
-
-    fig, axs = plt.subplots(1, 5)
-    axs = axs.flatten()
-    for idx, img, ax in zip(range(5), imgs, axs):
-        ax.imshow(img)
-        ax.axis('off')
-        if idx == 2:
-            ax.set_title(dct[chosen_classes[i]])
-
-    plt.savefig(f'Questionnaire_images/imgs_{class_}.png', dpi=700)
-
-
-
-
-
-    # CNN
-    # model.compile(metrics=[tf.keras.metrics.Accuracy(), tf.keras.metrics.AUC()])
-    # class_to_id = concept_bank.class_id_dct
-    # y_test_CNN = np.zeros((y_test.shape[0], model.layers[-1].output_shape[-1]))
-    # def encode_label(y):
-    #     return class_to_id[classes[y]]
-    # label_encoded = map(encode_label, y_test)
-    # for idx, label in enumerate(label_encoded):
-    #     y_test_CNN[idx, label] = 1
-    #
-    # # score = model.evaluate(X_test, y_test_CNN)
-    # # print(score)
-    # preds = model.predict(X_test)
-    # print(preds)
-    #
-    # X_test_preprocessed = tf.keras.applications.inception_v3.preprocess_input(X_test*255)
-    # preds2 = model.predict(X_test_preprocessed)
-    #
-    # print(tf.keras.applications.inception_v3.decode_predictions(preds))
-    # print(tf.keras.applications.inception_v3.decode_predictions(preds2))
+    os.remove(file)
