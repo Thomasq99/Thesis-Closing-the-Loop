@@ -254,6 +254,7 @@ def read_image(upload_contents: str, filename: str, shape: Tuple = (299, 299)) -
         file.write_bytes(decoded)
         img = skimage.io.imread(file)
         img = np.array(Image.fromarray(img).convert('RGB').resize(shape))
+        img = np.float32(img) / 255.0
         return img
 
 
@@ -271,7 +272,7 @@ def get_random_activation(session_dir: str, bottleneck: str) -> List:
 
 
 def create_new_concept(list_of_contents: List, filenames: List, session_dir: str, bottleneck: str,
-                       model: tf.keras.models.Model, mode: str = 'max'):
+                       model: tf.keras.models.Model, target_class, mode: str = 'max'):
     """ Creates a new CAV representing a concept from a list of images. Creates a new CAV trained on each random
         counterpart. The user can either take the maximum CAV accuracy or take the average of all CAVs. The found CAV
         will be stored, so it can be loaded later.
@@ -281,14 +282,16 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
     @param session_dir: Directory of the session the current user is in.
     @param bottleneck: Name of the bottleneck layer of the model for which the concept will be created.
     @param model: Tensorflow model for which the concept will be found.
+    @param target_class: Name of the target_class.
     @param mode: Mode of averaging the concepts. Can be 'max' or 'average'.
         'max': will take the concept with maximum CAV accuracy.
         'average': will average the learned CAVs out.
     @return: concept_name: The name of the learned concept.
     """
+
     # read in images
     images = np.stack([read_image(content, filename) for content, filename in zip(list_of_contents, filenames)], axis=0)
-    concept_name = f'userDefined_{filenames[0].split("_")[0]}'
+    concept_name = f'{target_class}__userDefined_{filenames[0].split("_")[0]}'
 
     concept_dir = os.path.join(session_dir, 'concepts', concept_name)
 
@@ -326,7 +329,8 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
         cav_avg.save_cav(os.path.join(session_dir, 'cavs'))
 
     # save images used to train the CAV
-    save_images(os.path.join(concept_dir, 'images'), list(images))
+    images = (images*255).astype(np.uint8)
+    save_images(os.path.join(concept_dir, 'images'), images)
 
     return concept_name
 

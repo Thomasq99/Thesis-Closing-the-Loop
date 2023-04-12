@@ -30,6 +30,7 @@ background_callback_manager = DiskcacheManager(cache)
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # my GPU is too small to save enough images in its V-RAM to get the gradients
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
+
 # define layout components of the concept bank menu
 concept_bank_menu = [
     html.H5('Concept Bank', style={'text-align': 'center', 'margin-bottom': '11px'}),
@@ -44,8 +45,11 @@ concept_bank_menu = [
                          style={'width': '324px'})
         ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
-        dcc.Upload(dbc.Button('Upload images to add concept', outline=True, color="primary", style={'width': '100%'}),
-                   multiple=True, id='upload_concept'),
+        dbc.InputGroup([
+            dcc.Upload(dbc.Button('Upload images to add concept', outline=True, color="primary",
+                                  style={'width': '100%'}), multiple=True, id='upload_concept'),
+            dbc.Input(id='target_class_add_concept', type='text', placeholder='Class for which the concept is')
+        ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
         dcc.Upload(dbc.Button('Import Concept Bank', outline=True, color='primary', style={'width': '100%'}),
                    style={'margin-top': '15px', 'margin-bottom': '15px'}, id='import_cb_button'),
@@ -207,6 +211,7 @@ app.layout = dbc.Container([html.H2('Closing the Concept Loop', style={'textAlig
                Input('remove_concept_button', 'n_clicks'),
                Input('import_cb_button', 'contents'),
                Input('upload_concept', 'contents'),
+               State('target_class_add_concept', 'value'),
                State('upload_concept', 'filename'),
                State('model_selection', 'value'),
                State('data_path', 'value'),
@@ -220,8 +225,9 @@ app.layout = dbc.Container([html.H2('Closing the Concept Loop', style={'textAlig
               background=True,
               prevent_initial_call=True,
               manager=background_callback_manager)
-def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_filenames, model_name, path_to_source,
-                        path_to_working_dir, target_classes, bottlenecks, stored_info, remove_concept_list):
+def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, target_class_add_concept, image_filenames,
+                        model_name, path_to_source, path_to_working_dir, target_classes, bottlenecks, stored_info,
+                        remove_concept_list):
 
     # get the id of the button that triggered the callback
     triggered_id = ctx.triggered_id
@@ -298,7 +304,7 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, image_f
         concept_bank_dct = {bn: ConceptBank(concept_bank_dct[bn]) for bn in concept_bank_dct.keys()}
         for bottleneck in bottlenecks:
             concept_name = create_new_concept(list_of_concept_images, image_filenames, path_to_working_dir, bottleneck,
-                                              model)
+                                              model, target_class_add_concept)
 
             if bottleneck in concept_bank_dct:
                 concept_bank_dct[bottleneck].add_concept([concept_name])
@@ -539,6 +545,24 @@ def validate_bottlenecks(bottlenecks, stored_model_layers):
     else:
         return False, True
 
+
+@app.callback([Output('target_class_add_concept', 'valid'), Output('target_class_add_concept', 'invalid')],
+              [Input('target_class_add_concept', 'value'),
+               State('data_path', 'value'),
+               Input('data_path', 'valid')],
+              prevent_initial_call=True)
+def validate_class_add_concept(target_classes, data_path, data_path_validity):
+    if not data_path_validity or target_classes is None:
+        return False, True
+    else:
+        target_class_lst = list(get_class_labels(data_path).keys())
+        target_classes = [target_class.strip() for target_class in target_classes.split(',')]
+
+        for target_class in target_classes:
+            if target_class not in target_class_lst:
+                return False, True
+
+        return True, False
 
 if __name__ == '__main__':
     app.run_server(debug=True)

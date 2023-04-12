@@ -44,7 +44,6 @@ class ConceptBank:
             # TODO implement
             raise ValueError('Not implemented when CAVs are in memory')
         else:
-            # TODO assert to check if exists
             self.concept_names.extend(concepts)
 
     def remove_concept(self, concept_name: str):
@@ -65,7 +64,6 @@ class ConceptBank:
         if (self.tcav_scores is None) or (len(self.tcav_scores)) != (len(self.concept_names)):
             self.compute_tcav_scores(discovery_images=discovery_images)
 
-        # get indices of sorted scores
         sorted_idxs = np.argsort(self.tcav_scores)[::-1]
 
         # sort based on indices
@@ -81,19 +79,15 @@ class ConceptBank:
         @param discovery_images: Dictionary containing an array of discovery images for each class.
             format is {concept_class_name: img_array}
         """
-        # split user defined concepts from automatically extracted concepts
-        concept_names_ACE = [concept for concept in self.concept_names if 'userDefined' not in concept]
-        concept_names_user_defined = [concept for concept in self.concept_names if 'userDefined' in concept]
-
         # For the discovered concepts get the classes for which they were discovered
-        concept_classes = np.array([concept.split('__')[0] for concept in concept_names_ACE])
+        concept_classes = np.array([concept.split('__')[0] for concept in self.concept_names])
 
         # load images if discovery_images is not supplied
         if discovery_images is None:
             discovery_images = {}
-            for concept in set(concept_classes):  # for each concept load the class images
-                image_dir = os.path.join(self.working_dir, 'concepts', concept, 'images')
-                discovery_images[concept] = load_images_from_files([os.path.join(image_dir, file) for file in
+            for class_ in set(concept_classes):  # for each concept load the class images
+                image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
+                discovery_images[class_] = load_images_from_files([os.path.join(image_dir, file) for file in
                                                                     os.listdir(image_dir)], do_shuffle=True,
                                                                    max_imgs=40)
 
@@ -103,14 +97,12 @@ class ConceptBank:
 
         model = self.load_model()
 
-        # For each concept automatically extracted using ACE compute the TCAV scores.
+        # For each concept compute the TCAV scores.
         tcav_scores = []
-        concepts_ACE = [self.concepts[i] for i in range(len(self.concepts)) if 'userDefined'
-                        not in self.concept_names[i]]
         for concept_class in set(concept_classes):
             # get gradients of images w.r.t. bottleneck layer
             class_id = self.class_id_dct[concept_class]
-            concepts_of_concept_class = np.array(concepts_ACE)[concept_classes == concept_class]
+            concepts_of_concept_class = np.array(self.concepts)[concept_classes == concept_class]
             discovery_images_of_class = discovery_images[concept_class]
             gradients = get_gradients_of_images(discovery_images_of_class, get_grad_model(model, self.bottleneck),
                                                 class_id)
@@ -118,7 +110,6 @@ class ConceptBank:
             # compute tcav scores
             tcav_scores.extend([concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class])
 
-        tcav_scores.extend([float('-inf') for concept in concept_names_user_defined])  # TODO get TCAV for user defined
         self.tcav_scores = tcav_scores
 
         if not self.in_memory:
