@@ -12,7 +12,7 @@ import base64
 from pathlib import Path
 import skimage.io
 import tempfile
-from Concepts.CAV import get_or_train_cav
+from Concepts.CAV import get_or_train_cav, CAV
 from PIL import Image
 import plotly.graph_objects as go
 from typing import Dict, List, Tuple
@@ -289,48 +289,52 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
     @return: concept_name: The name of the learned concept.
     """
 
-    # read in images
-    images = np.stack([read_image(content, filename) for content, filename in zip(list_of_contents, filenames)], axis=0)
-    concept_name = f'{target_class}__userDefined_{filenames[0].split("_")[0]}'
+    if filenames[0].endswith('.pkl'):
+        concept_name = filenames[0].split('-')[1].rstrip('.pkl')
 
-    concept_dir = os.path.join(session_dir, 'concepts', concept_name)
-
-    # create directory for storing the images of the user defined concept
-    if not os.path.exists(concept_dir):
-        os.makedirs(concept_dir)
+    # read images
     else:
-        shutil.rmtree(concept_dir)
-    os.makedirs(os.path.join(concept_dir, 'images'))
+        images = np.stack([read_image(content, filename) for content, filename in zip(list_of_contents, filenames)], axis=0)
+        concept_name = f'{target_class}__userDefined_{filenames[0].split("_")[0]}'
 
-    # get activations of the random counterpart
-    random_activations = get_random_activation(session_dir, bottleneck)
+        concept_dir = os.path.join(session_dir, 'concepts', concept_name)
 
-    # get activations of the images
-    concept_activations = get_activations_of_images(images, get_bottleneck_model(model, bottleneck))
+        # create directory for storing the images of the user defined concept
+        if not os.path.exists(concept_dir):
+            os.makedirs(concept_dir)
+        else:
+            shutil.rmtree(concept_dir)
+        os.makedirs(os.path.join(concept_dir, 'images'))
 
-    # for each random counterpart create a CAV
-    cavs = []
-    for rnd_act in random_activations:
-        act_dct = {concept_name: concept_activations.reshape((concept_activations.shape[0], -1)),
-                   'random_counterpart': rnd_act.reshape((rnd_act.shape[0], -1))}
-        cavs.append(get_or_train_cav([concept_name, 'random_counterpart'], bottleneck,
-                                     os.path.join(session_dir, 'cavs'), act_dct, save=False, ow=True))
+        # get activations of the random counterpart
+        random_activations = get_random_activation(session_dir, bottleneck)
 
-    if mode == 'max':  # save CAV with maximum accuracy
-        cav_accuracies = [cav.accuracy for cav in cavs]
-        max_cav = cavs[np.argmax(cav_accuracies)]
-        max_cav.file_name = f'{max_cav.bottleneck}-{max_cav.concept}.pkl'
-        max_cav.save_cav(os.path.join(session_dir, 'cavs'))
+        # get activations of the images
+        concept_activations = get_activations_of_images(images, get_bottleneck_model(model, bottleneck))
 
-    elif mode == 'average':  # save average of all CAV directions
-        cav_avg = cavs[0]
-        cav_avg.cav = np.mean(np.array([cav.cav for cav in cavs]), axis=0)
-        cav_avg.file_name = f'{cav_avg.bottleneck}-{cav_avg.concept}.pkl'
-        cav_avg.save_cav(os.path.join(session_dir, 'cavs'))
+        # for each random counterpart create a CAV
+        cavs = []
+        for rnd_act in random_activations:
+            act_dct = {concept_name: concept_activations.reshape((concept_activations.shape[0], -1)),
+                       'random_counterpart': rnd_act.reshape((rnd_act.shape[0], -1))}
+            cavs.append(get_or_train_cav([concept_name, 'random_counterpart'], bottleneck,
+                                         os.path.join(session_dir, 'cavs'), act_dct, save=False, ow=True))
 
-    # save images used to train the CAV
-    images = (images*255).astype(np.uint8)
-    save_images(os.path.join(concept_dir, 'images'), images)
+        if mode == 'max':  # save CAV with maximum accuracy
+            cav_accuracies = [cav.accuracy for cav in cavs]
+            max_cav = cavs[np.argmax(cav_accuracies)]
+            max_cav.file_name = f'{max_cav.bottleneck}-{max_cav.concept}.pkl'
+            max_cav.save_cav(os.path.join(session_dir, 'cavs'))
+
+        elif mode == 'average':  # save average of all CAV directions
+            cav_avg = cavs[0]
+            cav_avg.cav = np.mean(np.array([cav.cav for cav in cavs]), axis=0)
+            cav_avg.file_name = f'{cav_avg.bottleneck}-{cav_avg.concept}.pkl'
+            cav_avg.save_cav(os.path.join(session_dir, 'cavs'))
+
+        # save images used to train the CAV
+        images = (images*255).astype(np.uint8)
+        save_images(os.path.join(concept_dir, 'images'), images)
 
     return concept_name
 
