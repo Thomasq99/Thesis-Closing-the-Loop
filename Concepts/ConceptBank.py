@@ -24,7 +24,7 @@ class ConceptBank:
         self.model_name = concept_dct.get('model_name', None)
         self.in_memory = concept_dct.get('in_memory', False)
         self.tcav_scores = concept_dct.get('tcav_scores', None)
-        self.concepts = concept_dct.get('tcav_scores', None)
+        self.concepts = concept_dct.get('concepts', None)
 
     def load_model(self):
         # load in tensorflow model
@@ -79,8 +79,13 @@ class ConceptBank:
         @param discovery_images: Dictionary containing an array of discovery images for each class.
             format is {concept_class_name: img_array}
         """
+        if self.tcav_scores is not None:
+            concept_names_to_compute = self.concept_names[-(len(self.concept_names) - len(self.tcav_scores)):]
+        else:
+            self.tcav_scores = []
+            concept_names_to_compute = self.concept_names
         # For the discovered concepts get the classes for which they were discovered
-        concept_classes = np.array([concept.split('__')[0] for concept in self.concept_names])
+        concept_classes = np.array([concept.split('__')[0] for concept in concept_names_to_compute])
 
         # load images if discovery_images is not supplied
         if discovery_images is None:
@@ -95,14 +100,16 @@ class ConceptBank:
             self.load_in_memory()
             self.in_memory = False
 
+        concepts_to_compute = [concept for concept in self.concepts if concept.concept in concept_names_to_compute]
+
         model = self.load_model()
 
         # For each concept compute the TCAV scores.
-        tcav_scores = []
+        tcav_scores = self.tcav_scores
         for concept_class in set(concept_classes):
             # get gradients of images w.r.t. bottleneck layer
             class_id = self.class_id_dct[concept_class]
-            concepts_of_concept_class = np.array(self.concepts)[concept_classes == concept_class]
+            concepts_of_concept_class = np.array(concepts_to_compute)[concept_classes == concept_class]
             discovery_images_of_class = discovery_images[concept_class]
             gradients = get_gradients_of_images(discovery_images_of_class, get_grad_model(model, self.bottleneck),
                                                 class_id)
