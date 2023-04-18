@@ -46,9 +46,9 @@ concept_bank_menu = [
         ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
         dbc.InputGroup([
-            dcc.Upload(dbc.Button('Upload images to add concept', outline=True, color="primary",
+            dcc.Upload(dbc.Button('Upload images/CAV to add concept', outline=True, color="primary",
                                   style={'width': '100%'}), multiple=True, id='upload_concept'),
-            dbc.Input(id='target_class_add_concept', type='text', placeholder='Class for which the concept is')
+            dbc.Input(id='target_class_add_concept', type='text', placeholder='Target class')
         ], style={'margin-top': '15px', 'margin-bottom': '15px'}),
 
         dcc.Upload(dbc.Button('Import Concept Bank', outline=True, color='primary', style={'width': '100%'}),
@@ -240,6 +240,7 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, target_
         concept_bank_dct, classes = stored_info['concept_bank_dct'], stored_info['classes']
 
     if triggered_id == 'start_ACE':  # automatically extract concepts
+        found_new = []
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
         target_classes = [target_class.strip() for target_class in target_classes.split(',')]
         for target_class in target_classes:
@@ -247,11 +248,12 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, target_
                                                                                            ConceptBank)]
             if bottlenecks_to_go_to_dct:
                 concept_bank_dct = {bn: concept_bank_dct[bn].to_dict() for bn in bottlenecks_to_go_to_dct}
-            concept_bank_dct, classes, found_new = run_ACE(model_name, path_to_source, path_to_working_dir,
+            concept_bank_dct, classes, found_new_ = run_ACE(model_name, path_to_source, path_to_working_dir,
                                                            target_class, bottlenecks, concept_bank_dct, classes)
+            found_new.append(found_new_)
 
         # sort concept banks:
-        if found_new:
+        if True in found_new:
             print('sorting concept bank')
             for bottleneck in concept_bank_dct:
                 if isinstance(concept_bank_dct[bottleneck], dict):
@@ -563,6 +565,7 @@ def validate_class_add_concept(target_classes, data_path, data_path_validity):
                 return False, True
 
         return True, False
+
 
 if __name__ == '__main__':
     app.run_server(debug=True)

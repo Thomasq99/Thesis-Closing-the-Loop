@@ -602,4 +602,3 @@ class ACE:
                     cav.cav = np.mean(np.array(cavs), axis=0)
                     cav.file_name = f'{cav.bottleneck}-{cav.concept}.pkl'
                     cav.save_cav(os.path.join(self.working_dir, 'cavs'))
-        shutil.rmtree(self.cav_dir)

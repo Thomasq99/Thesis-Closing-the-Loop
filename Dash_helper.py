@@ -263,12 +263,17 @@ def get_random_activation(session_dir: str, bottleneck: str) -> List:
 
     @param session_dir: Name of the current session of the user
     @param bottleneck: Name of the bottleneck for which to find the activations
-    @return: List with the activations of the random counterparts
+    @return: List with the activations of the random counterparts, List with the names of the activations
     """
     random_activations = os.listdir(os.path.join(session_dir, 'acts'))
 
-    return [np.load(os.path.join(session_dir, 'acts', rnd_acts_path)).squeeze() for rnd_acts_path in random_activations
-            if bottleneck in rnd_acts_path]
+    acts = []
+    names = []
+    for rnd_acts_path in random_activations:
+        if (bottleneck in rnd_acts_path) and ('random500' in rnd_acts_path):
+            acts.append(np.load(os.path.join(session_dir, 'acts', rnd_acts_path)).squeeze())
+            names.append(rnd_acts_path.lstrip('acts').rstrip('.npy').rstrip(bottleneck).strip('_'))
+    return acts, names
 
 
 def create_new_concept(list_of_contents: List, filenames: List, session_dir: str, bottleneck: str,
@@ -295,7 +300,7 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
     # read images
     else:
         images = np.stack([read_image(content, filename) for content, filename in zip(list_of_contents, filenames)], axis=0)
-        concept_name = f'{target_class}__userDefined_{filenames[0].split("_")[0]}'
+        concept_name = f'{target_class}__userDefined_{filenames[0].split(".")[0]}'
 
         concept_dir = os.path.join(session_dir, 'concepts', concept_name)
 
@@ -307,18 +312,23 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
         os.makedirs(os.path.join(concept_dir, 'images'))
 
         # get activations of the random counterpart
-        random_activations = get_random_activation(session_dir, bottleneck)
+        random_activations, random_names = get_random_activation(session_dir, bottleneck)
 
         # get activations of the images
         concept_activations = get_activations_of_images(images, get_bottleneck_model(model, bottleneck))
 
         # for each random counterpart create a CAV
         cavs = []
-        for rnd_act in random_activations:
+        for name, rnd_act in zip(random_names, random_activations):
             act_dct = {concept_name: concept_activations.reshape((concept_activations.shape[0], -1)),
-                       'random_counterpart': rnd_act.reshape((rnd_act.shape[0], -1))}
-            cavs.append(get_or_train_cav([concept_name, 'random_counterpart'], bottleneck,
+                       name: rnd_act.reshape((rnd_act.shape[0], -1))}
+            cavs.append(get_or_train_cav([concept_name, name], bottleneck,
                                          os.path.join(session_dir, 'cavs'), act_dct, save=False, ow=True))
+
+        if not os.path.exists(os.path.join(session_dir, 'cavs_temp')):
+            os.makedirs(os.path.join(session_dir, 'cavs_temp'))
+
+        [cav.save_cav(os.path.join(session_dir, 'cavs_temp')) for cav in cavs]
 
         if mode == 'max':  # save CAV with maximum accuracy
             cav_accuracies = [cav.accuracy for cav in cavs]

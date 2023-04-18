@@ -8,7 +8,8 @@ from skimage.segmentation import mark_boundaries
 import numpy as np
 import plotly.graph_objects as go
 import tensorflow as tf
-
+import scipy.stats as stats
+from decimal import Decimal
 
 class ConceptBank:
     """ Class to use as a concept bank. For a current session all concepts can be stored in a concept bank.
@@ -25,6 +26,7 @@ class ConceptBank:
         self.in_memory = concept_dct.get('in_memory', False)
         self.tcav_scores = concept_dct.get('tcav_scores', None)
         self.concepts = concept_dct.get('concepts', None)
+        self.p_vals = concept_dct.get('p_vals', None)
 
     def load_model(self):
         # load in tensorflow model
@@ -56,6 +58,7 @@ class ConceptBank:
             del self.concepts[remove_idx]
         if self.tcav_scores:
             del self.tcav_scores[remove_idx]
+            del self.p_vals[remove_idx]
 
     def sort_concepts(self, discovery_images=None):
         """Sorts concepts based on the TCAV scores of the concepts."""
@@ -69,6 +72,7 @@ class ConceptBank:
         # sort based on indices
         self.tcav_scores = list(np.array(self.tcav_scores)[sorted_idxs])
         self.concept_names = list(np.array(self.concept_names)[sorted_idxs])
+        self.p_vals = list(np.array(self.p_vals)[sorted_idxs])
         if self.in_memory:
             self.concepts = list(np.array(self.concepts)[sorted_idxs])
 
@@ -83,6 +87,7 @@ class ConceptBank:
             concept_names_to_compute = self.concept_names[-(len(self.concept_names) - len(self.tcav_scores)):]
         else:
             self.tcav_scores = []
+            self.p_vals = []
             concept_names_to_compute = self.concept_names
         # For the discovered concepts get the classes for which they were discovered
         concept_classes = np.array([concept.split('__')[0] for concept in concept_names_to_compute])
@@ -104,8 +109,14 @@ class ConceptBank:
 
         model = self.load_model()
 
+        folder_path = os.path.join(self.working_dir, 'cavs_temp')
+        cavs_random = [CAV.load_cav(os.path.join(folder_path, filename)) for filename in os.listdir(folder_path)
+                       if ('random_discovery' in filename) and (self.bottleneck in filename) and
+                       ('random500' in filename)]
+
         # For each concept compute the TCAV scores.
         tcav_scores = self.tcav_scores
+        p_vals = self.p_vals
         for concept_class in set(concept_classes):
             # get gradients of images w.r.t. bottleneck layer
             class_id = self.class_id_dct[concept_class]
@@ -113,10 +124,18 @@ class ConceptBank:
             discovery_images_of_class = discovery_images[concept_class]
             gradients = get_gradients_of_images(discovery_images_of_class, get_grad_model(model, self.bottleneck),
                                                 class_id)
+            # compute tcav scores random
+            tcav_scores_random = [cav.compute_tcav_score(gradients) for cav in cavs_random]
 
-            # compute tcav scores
-            tcav_scores.extend([concept.compute_tcav_score(gradients) for concept in concepts_of_concept_class])
+            # compute tcav scores concepts
+            for concept in concepts_of_concept_class:
+                cavs = [CAV.load_cav(os.path.join(folder_path, filename)) for filename in os.listdir(folder_path)
+                        if (str(concept.concept) + '-' in filename) and (self.bottleneck in filename)]
+                tcav_scores_p_val = [cav.compute_tcav_score(gradients) for cav in cavs]
+                p_vals.extend([stats.ttest_rel(tcav_scores_p_val, tcav_scores_random)[1]])
+                tcav_scores.extend([concept.compute_tcav_score(gradients)])
 
+        self.p_vals = p_vals
         self.tcav_scores = tcav_scores
 
         if not self.in_memory:
@@ -127,7 +146,7 @@ class ConceptBank:
         """ Exports a ConceptBank as a dictionary."""
         return {'bottleneck': self.bottleneck, 'concept_names': self.concept_names, 'working_dir': self.working_dir,
                 'class_id_dct': self.class_id_dct, 'model_name': self.model_name, 'in_memory': self.in_memory,
-                'concepts': self.concepts, 'tcav_scores': self.tcav_scores}
+                'concepts': self.concepts, 'tcav_scores': self.tcav_scores, 'p_vals': self.p_vals}
 
     def load_in_memory(self):
         """ Loads the CAVs of the concepts in memory"""
@@ -225,18 +244,19 @@ class ConceptBank:
         for idx, concept in enumerate(concept_names_ACE):
             title = ['']*2*num_images
             if self.tcav_scores is not None:
-                subtitle = f'{concept}: TCAV Score of {self.tcav_scores[idx]}, CAV accuracy of ' \
+                subtitle = f'{concept}: TCAV Score: {self.tcav_scores[idx]}, p:{Decimal(self.p_vals[idx]):.2E}, CAV accuracy:' \
                            f'{self.concepts[idx].accuracy}'
             else:
-                subtitle = f'{concept}: CAV accuracy of {self.concepts[idx].accuracy}'
+                subtitle = f'{concept}: CAV accuracy:{self.concepts[idx].accuracy}'
             title[middle] = subtitle
             subplot_titles.extend(title)
 
         for idx_user_defined, concept in enumerate(concept_names_user_defined):
             title = ['']*num_images
             if self.tcav_scores is not None:
-                subtitle = f'{concept}: TCAV Score of {self.tcav_scores[idx + idx_user_defined + 1]}, CAV accuracy of '\
-                           f'{self.concepts[idx + idx_user_defined + 1].accuracy}'
+                subtitle = f'{concept}: TCAV Score:{self.tcav_scores[idx + idx_user_defined + 1]}, ' \
+                           f'p:{Decimal(self.p_vals[idx + idx_user_defined + 1]):.2E},' \
+                           f' CAV accuracy of {self.concepts[idx + idx_user_defined + 1].accuracy}'
             else:
                 subtitle = f'{concept}: CAV accuracy of {self.concepts[idx + idx_user_defined + 1].accuracy}'
             title[middle] = subtitle
