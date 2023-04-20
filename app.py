@@ -1,7 +1,7 @@
 import time
 from sklearn import metrics
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.linear_model import LogisticRegressionCV
+from sklearn.linear_model import SGDClassifier
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
 import dash_bootstrap_components as dbc
@@ -19,6 +19,7 @@ import io
 import numpy as np
 import plotly.express as px
 import json
+import plotly.figure_factory as ff
 
 MAX_ROWS_CONCEPT_VIS = 60
 SHAPE_IMGS_CONCEPT_VIS = (60, 60)
@@ -139,28 +140,33 @@ Concept_bank_tab_content = dbc.Container(
 
 ph_CBM_tab_content = dbc.Container(
     [
+        dcc.Store(id='linear_model'),
+        html.Div(id='save_output_lm', style={'display': 'none'}),
         dbc.Row(
             [
                 dbc.Col(
                     [
                         dbc.Row([
-                            html.H5('ph_CBM settings', style={'text-align': 'center', 'margin-bottom': '15px',
+                            html.H5('post-hoc CBM settings', style={'text-align': 'center', 'margin-bottom': '15px',
                                                               'margin-top': '15px'}),
                             dbc.Label('Classes to include for classification:'),
                             dcc.Dropdown(id='choose_class', multi=True, className="dash-bootstrap",
                                          placeholder='Classes to classify'),
-                            dbc.InputGroup([dbc.Button(dbc.Spinner(html.Div("Start ph_CBM", id='spinner_ph_CBM')),
+                            dbc.Label('Run post-hoc CBM:'),
+                            dbc.InputGroup([dbc.Button(dbc.Spinner(html.Div("Start post-hoc CBM", id='spinner_ph_CBM')),
                                                        id='start_ph_CBM', outline=True, color='primary', n_clicks=0),
-                                            dbc.Select(id='bottleneck_phCBM')])
+                                            dbc.Select(id='bottleneck_phCBM', placeholder='bottleneck')])
                              ], class_name='h-50'),
 
                         dbc.Row([
-                            html.H5('ph_CBM results', style={'text-align': 'center', 'margin-bottom': '15px',
+                            html.H5('post-hoc CBM results', style={'text-align': 'center', 'margin-bottom': '15px',
                                                              'margin-top': '15px'}),
-                            html.Div("Linear Model Accuracy = NaN \t CNN Accuracy = NaN", id='accuracy'),
-                            html.Div('Linear Model AUC = NaN \t CNN AUC = NaN'),
-                            dbc.Button('Remove concepts with weight = 0', id='remove_concepts_weight_0', outline=True,
-                                       color='primary', n_clicks=0),
+                            html.Div('Train data size = NaN', id='train_size'),
+                            html.Div('Test data size = NaN', id='test_size'),
+                            html.Div("Train Accuracy = NaN", id='train_accuracy'),
+                            html.Div("Test Accuracy = NaN", id='test_accuracy'),
+                            html.Div('Train AUC = NaN', id='train_auc'),
+                            html.Div('Test AUC = NaN', id='test_auc'),
                             dbc.Button("Save linear model", id='save_linear_model_button', outline=True,
                                        color='primary', n_clicks=0),
 
@@ -340,10 +346,11 @@ def update_concept_bank(b1, b2, b3, uploaded_cb, list_of_concept_images, target_
 
 @app.callback(Output('save_output', 'children'),
               [Input('save_button', 'n_clicks'),
-               State('concept_bank', 'data')],
+               State('concept_bank', 'data'),
+               State('working_dir', 'value')],
               prevent_initial_call=True)
-def save_concept_bank(b1, stored_info):
-    with open('./saved_concept_bank.pkl', 'wb') as file:
+def save_concept_bank(b1, stored_info, session_dir):
+    with open(os.path.join(session_dir, 'saved_concept_bank.pkl'), 'wb') as file:
         p.dump(stored_info, file, protocol=-1)
     return None
 
@@ -381,13 +388,21 @@ def get_vis_phCBM_options(stored_info, data_path):
         concept_bank_dct = stored_info['concept_bank_dct']
         bottleneck_options = get_sessions_bottlenecks(concept_bank_dct)
         classes = list(get_class_labels(data_path).keys())
+        classes.append('ALL')
         options_classes = [{'label': class_, 'value': class_} for class_ in classes]
         return False, options_classes, bottleneck_options, bottleneck_options[0]['value']
 
 
-@app.callback([Output('spinner_ph_CBM', 'children'),
+@app.callback([Output('linear_model', 'data'),
+               Output('spinner_ph_CBM', 'children'),
                Output('weight_vis_CBM', 'figure'),
-               Output('marginal_utility_vis_CBM', 'figure')],
+               Output('marginal_utility_vis_CBM', 'figure'),
+               Output('train_accuracy', 'children'),
+               Output('train_auc', 'children'),
+               Output('test_accuracy', 'children'),
+               Output('test_auc', 'children'),
+               Output('train_size', 'children'),
+               Output('test_size', 'children')],
               [Input('start_ph_CBM', 'n_clicks'),
                State('choose_class', 'value'),
                State('concept_bank', 'data'),
@@ -406,6 +421,9 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
         id_to_folder[int(key)] = value[0]
         class_to_id[value[1]] = int(key)
 
+    if 'ALL' in classes:
+        classes = list(class_to_id.keys())
+
     print('Projecting images onto concept subspace')
     concept_bank_dct = stored_info['concept_bank_dct']
     concept_bank = ConceptBank(concept_bank_dct[bottleneck])
@@ -415,8 +433,9 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     for idx, class_ in enumerate(classes):
         filenames = [os.path.join(data_path, id_to_folder[class_to_id[class_]], filename) for filename in
                      os.listdir(os.path.join(data_path, id_to_folder[class_to_id[class_]]))]
-        images.append(load_images_from_files(filenames, max_imgs=1500))
-        labels.extend([idx]*len(filenames))
+        imgs = load_images_from_files(filenames, max_imgs=1000)
+        images.append(imgs)
+        labels.extend([idx]*imgs.shape[0])
     images_arr = np.concatenate(images, axis=0)
     print(images_arr.shape)
 
@@ -431,43 +450,95 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     X_train_proj, X_test_proj = projected_imgs[train_index], projected_imgs[test_index]
     y_train, y_test = labels[train_index], labels[test_index]
 
-    lr = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=2000)
-    lr.fit(X_train_proj, y_train)
+    classifier = SGDClassifier(random_state=1234, loss="log_loss",
+                               alpha=1e-5, l1_ratio=0.99, verbose=0,
+                               penalty="elasticnet", max_iter=10000)
 
-    print('making plots')
+    classifier.fit(X_train_proj, y_train)
+
+    # accuracy and AUC
+    train_predictions = classifier.predict(X_train_proj)
+    train_accuracy = np.mean((y_train == train_predictions)) * 100.
+    predictions = classifier.predict(X_test_proj)
+    test_accuracy = np.mean((y_test == predictions)) * 100.
+
+    if len(classes) == 2:
+        y_score_test = classifier.predict_proba(X_test_proj)[:, 1]
+        fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score_test)
+        test_auc = metrics.auc(fpr, tpr)
+        y_score_train = classifier.predict_proba(X_train_proj)[:, 1]
+        fpr, tpr, thresholds = metrics.roc_curve(y_train, y_score_train)
+        train_auc = metrics.auc(fpr, tpr)
+    else:
+        train_auc = 0
+        test_auc = 0
+
     # regression weight plot
-    colors = [classes[0] if c > 0 else classes[1] for c in lr.coef_[0]]
+    colors = [classes[0] if c > 0 else classes[1] for c in classifier.coef_[0]]
 
     regression_fig = px.bar(
-        x=concept_bank.concept_names, y=lr.coef_[0], color=colors,
+        x=concept_bank.concept_names, y=classifier.coef_[0], color=colors,
         color_discrete_sequence=['red', 'blue'],
         labels=dict(x='Feature', y='Linear coefficient'),
-        title=f'Regression weights for classifying {classes}'
+        title='Regression weights'
     )
 
-    # accuracy and AUC scores
-    # Linear Model
-    y_score = lr.predict_proba(X_test_proj)[:, 1]
-    y_hat = lr.predict(X_test_proj)
-    fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score)
-    lm_score = metrics.auc(fpr, tpr)
-    lm_accuracy = metrics.accuracy_score(y_test, y_hat)
-    print(lm_score)
-    print(lm_accuracy)
+    # confusion matrix fig
+    confusion_matrix = metrics.confusion_matrix(y_test, predictions)
+    z = confusion_matrix.astype(int)
+    x = classes
+    y = classes
 
-    # # Compute accuracy gain per concept:
-    # accuracy_gain = []
-    # for idx, concept_name in enumerate(concept_bank.concept_names):
-    #     X_train_proj_concept, X_test_proj_concept = np.delete(X_train_proj, idx, 1), np.delete(X_test_proj, idx, 1)
-    #     lr_concept = LogisticRegressionCV(penalty='l1', solver='liblinear', max_iter=1000)
-    #     lr_concept.fit(X_train_proj_concept, y_train)
-    #     y_hat_concept = lr_concept.predict(X_test_proj_concept)
-    #     acc_gain = lm_accuracy - metrics.accuracy_score(y_test, y_hat_concept)
-    #     accuracy_gain.append(acc_gain)
-    #
-    # acc_gain_fig = px.bar(x=concept_bank.concept_names, y=accuracy_gain)
+    # change each element of z to type string for annotations
+    z_text = [[str(y) for y in x] for x in z]
 
-    return 'Start ph_CBM', regression_fig, blank_fig()
+    # set up figure
+    confusion_matrix_fig = ff.create_annotated_heatmap(z, x=x, y=y, annotation_text=z_text, colorscale='Viridis')
+
+    # add title
+    confusion_matrix_fig.update_layout(title_text='<i><b>Confusion matrix</b></i>',
+                      # xaxis = dict(title='x'),
+                      # yaxis = dict(title='x')
+                      )
+
+    # add custom xaxis title
+    confusion_matrix_fig.add_annotation(dict(font=dict(color="black", size=14),
+                                             x=0.5, y=-0.15, showarrow=False, text="Predicted value",
+                                             xref="paper", yref="paper"))
+
+    # add custom yaxis title
+    confusion_matrix_fig.add_annotation(dict(font=dict(color="black", size=14), x=-0.35, y=0.5, showarrow=False,
+                                             text="Real value", textangle=-90, xref="paper", yref="paper"))
+
+    # adjust margins to make room for yaxis title
+    confusion_matrix_fig.update_layout(margin=dict(t=50, l=200))
+
+    # add colorbar
+    confusion_matrix_fig['data'][0]['showscale'] = True
+
+    model_bytes = p.dumps(classifier)
+    model_str = base64.b64encode(model_bytes).decode()
+
+    return model_str, 'Start ph_CBM', regression_fig, confusion_matrix_fig,\
+           f'Train Accuracy = {train_accuracy:.2f}%', f'Test Accuracy = {test_accuracy:.2f}%', \
+           f'Train AUC = {train_auc:.2f}', f'Test AUC = {test_auc:.2f}', f'Train data size = {X_train_proj.shape[0]}',\
+           f'Test data size = {X_test_proj.shape[0]}'
+
+
+@app.callback(Output('save_output_lm', 'children'),
+              [Input('save_linear_model_button', 'n_clicks'),
+               State('linear_model', 'data'),
+               State('working_dir', 'value')],
+              prevent_initial_call=True)
+def save_linear_model(b1, model_str, session_dir):
+    # Decode the base64 string back to a bytes object
+    model_bytes = base64.b64decode(model_str.encode())
+    # Convert the bytes object back to a model object using pickle
+    model = p.loads(model_bytes)
+    with open(os.path.join(session_dir, 'saved_linear_model.pkl'), 'wb') as file:
+        p.dump(model, file, protocol=-1)
+    return None
+
 
 
 @app.callback(Output('model_layers', 'data'),
