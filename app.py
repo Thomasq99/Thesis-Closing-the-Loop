@@ -1,7 +1,7 @@
 import time
 from sklearn import metrics
 from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.linear_model import SGDClassifier
+from sklearn.linear_model import SGDClassifier, LogisticRegressionCV
 import dash.exceptions
 from dash import Dash, html, dcc, DiskcacheManager, ctx
 import dash_bootstrap_components as dbc
@@ -175,11 +175,12 @@ ph_CBM_tab_content = dbc.Container(
                     ], width=3),
 
                 dbc.Col([
-                    dbc.Row(html.H5('Visualization of ph_CBM regression', style={'textAlign': 'center'})),
-                    dbc.Row([dbc.Col(dcc.Graph(figure=blank_fig(), id='weight_vis_CBM',
+                    dbc.Row(html.H5('Visualizations', style={'textAlign': 'center'})),
+                    dbc.Row([dbc.Col([dcc.Graph(figure=blank_fig(), id='weight_vis_CBM',
                                                style={'overflowY': 'scroll', 'overflowX': 'scroll', 'height': '70vh'}),
+                                      dcc.Dropdown(id='weight_dropdown', className='dash-bootstrap')],
                                      width=6),
-                             dbc.Col(dcc.Graph(figure=blank_fig(), id='marginal_utility_vis_CBM',
+                             dbc.Col(dcc.Graph(figure=blank_fig(), id='confusion_matrix',
                                                style={'overflowY': 'scroll', 'overflowX': 'scroll', 'height': '70vh'}),
                                      width=6)])
 
@@ -395,8 +396,8 @@ def get_vis_phCBM_options(stored_info, data_path):
 
 @app.callback([Output('linear_model', 'data'),
                Output('spinner_ph_CBM', 'children'),
-               Output('weight_vis_CBM', 'figure'),
-               Output('marginal_utility_vis_CBM', 'figure'),
+               Output('weight_dropdown', 'value'),
+               Output('confusion_matrix', 'figure'),
                Output('train_accuracy', 'children'),
                Output('train_auc', 'children'),
                Output('test_accuracy', 'children'),
@@ -430,14 +431,13 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
 
     images = []
     labels = []
-    for idx, class_ in enumerate(classes):
-        filenames = [os.path.join(data_path, id_to_folder[class_to_id[class_]], filename) for filename in
-                     os.listdir(os.path.join(data_path, id_to_folder[class_to_id[class_]]))]
+    for idx, class__ in enumerate(classes):
+        filenames = [os.path.join(data_path, id_to_folder[class_to_id[class__]], filename) for filename in
+                     os.listdir(os.path.join(data_path, id_to_folder[class_to_id[class__]]))]
         imgs = load_images_from_files(filenames, max_imgs=1000)
         images.append(imgs)
         labels.extend([idx]*imgs.shape[0])
     images_arr = np.concatenate(images, axis=0)
-    print(images_arr.shape)
 
     projected_imgs = concept_bank.project_onto_conceptspace(images_arr)
     labels = np.array(labels)
@@ -450,9 +450,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     X_train_proj, X_test_proj = projected_imgs[train_index], projected_imgs[test_index]
     y_train, y_test = labels[train_index], labels[test_index]
 
-    classifier = SGDClassifier(random_state=1234, loss="log_loss",
-                               alpha=1e-5, l1_ratio=0.99, verbose=0,
-                               penalty="elasticnet", max_iter=10000)
+    classifier = LogisticRegressionCV(penalty='l1', solver='saga', max_iter=10000, multi_class='multinomial')
 
     classifier.fit(X_train_proj, y_train)
 
@@ -462,26 +460,10 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     predictions = classifier.predict(X_test_proj)
     test_accuracy = np.mean((y_test == predictions)) * 100.
 
-    if len(classes) == 2:
-        y_score_test = classifier.predict_proba(X_test_proj)[:, 1]
-        fpr, tpr, thresholds = metrics.roc_curve(y_test, y_score_test)
-        test_auc = metrics.auc(fpr, tpr)
-        y_score_train = classifier.predict_proba(X_train_proj)[:, 1]
-        fpr, tpr, thresholds = metrics.roc_curve(y_train, y_score_train)
-        train_auc = metrics.auc(fpr, tpr)
-    else:
-        train_auc = 0
-        test_auc = 0
-
-    # regression weight plot
-    colors = [classes[0] if c > 0 else classes[1] for c in classifier.coef_[0]]
-
-    regression_fig = px.bar(
-        x=concept_bank.concept_names, y=classifier.coef_[0], color=colors,
-        color_discrete_sequence=['red', 'blue'],
-        labels=dict(x='Feature', y='Linear coefficient'),
-        title='Regression weights'
-    )
+    y_score_test = classifier.predict_proba(X_test_proj)
+    test_auc = metrics.roc_auc_score(y_test, y_score_test, multi_class='ovr')
+    y_score_train = classifier.predict_proba(X_train_proj)
+    train_auc = metrics.roc_auc_score(y_train, y_score_train, multi_class='ovr')
 
     # confusion matrix fig
     confusion_matrix = metrics.confusion_matrix(y_test, predictions)
@@ -519,7 +501,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     model_bytes = p.dumps(classifier)
     model_str = base64.b64encode(model_bytes).decode()
 
-    return model_str, 'Start ph_CBM', regression_fig, confusion_matrix_fig,\
+    return model_str, 'Start ph_CBM', classes[0], confusion_matrix_fig,\
            f'Train Accuracy = {train_accuracy:.2f}%', f'Test Accuracy = {test_accuracy:.2f}%', \
            f'Train AUC = {train_auc:.2f}', f'Test AUC = {test_auc:.2f}', f'Train data size = {X_train_proj.shape[0]}',\
            f'Test data size = {X_test_proj.shape[0]}'
@@ -538,7 +520,6 @@ def save_linear_model(b1, model_str, session_dir):
     with open(os.path.join(session_dir, 'saved_linear_model.pkl'), 'wb') as file:
         p.dump(model, file, protocol=-1)
     return None
-
 
 
 @app.callback(Output('model_layers', 'data'),
@@ -636,6 +617,71 @@ def validate_class_add_concept(target_classes, data_path, data_path_validity):
                 return False, True
 
         return True, False
+
+
+@app.callback([Output('weight_dropdown', 'options'),
+               Output('weight_dropdown', 'disabled')],
+              [Input('choose_class', 'value'),
+               State('data_path', 'value')],
+              prevent_initial_call=True)
+def update_weight_dropdown(classes, data_path):
+    # get class_to_id and id_to_folder dictionaries
+    with open(os.path.join(data_path, 'class_index.json')) as file:
+        dct = json.load(file)
+
+    class_to_id = {}
+    id_to_folder = {}
+    for key, value in dct.items():
+        id_to_folder[int(key)] = value[0]
+        class_to_id[value[1]] = int(key)
+
+    if 'ALL' in classes:
+        classes = list(class_to_id.keys())
+
+    if len(classes) == 2:
+        disabled = True
+    else:
+        disabled = False
+
+    return classes, disabled
+
+
+@app.callback(Output('weight_vis_CBM', 'figure'),
+              [Input('weight_dropdown', 'value'),
+               State('choose_class', 'value'),
+               State('bottleneck_phCBM', 'value'),
+               State('concept_bank', 'data'),
+               State('linear_model', 'data')],
+              prevent_initial_call=True)
+def update_weight_vis(class_, classes, bottleneck, stored_info_conceptbank, stored_info_linear_model):
+    model_bytes = base64.b64decode(stored_info_linear_model.encode())
+    # Convert the bytes object back to a model object using pickle
+    classifier = p.loads(model_bytes)
+    class_idx = classes.index(class_)
+
+    concept_bank_dct = stored_info_conceptbank['concept_bank_dct']
+    concept_bank = ConceptBank(concept_bank_dct[bottleneck])
+    if len(classes) == 2:
+        colors = [classes[0] if c < 0 else classes[1] for c in classifier.coef_[0]]
+
+        regression_fig = px.bar(
+            x=concept_bank.concept_names, y=classifier.coef_[0], color=colors,
+            color_discrete_sequence=['red', 'blue'],
+            labels=dict(x='Feature', y='Linear coefficient'),
+            title='<i><b>Regression Weights</b></i>'
+        )
+
+    else:
+        colors = ['Negative' if c < 0 else 'Positive' for c in classifier.coef_[class_idx]]
+
+        # regression weight plot
+        regression_fig = px.bar(
+            x=concept_bank.concept_names, y=classifier.coef_[class_idx], color= colors,
+            labels=dict(x='Feature', y='Linear coefficient'),
+            title='<i><b>Regression Weights</b></i>'
+        )
+
+    return regression_fig
 
 
 if __name__ == '__main__':

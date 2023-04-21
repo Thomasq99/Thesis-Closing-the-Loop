@@ -216,7 +216,7 @@ class ConceptBank:
             concept_norms.append(concept.norm)
         concept_matrix = np.concatenate(concepts, axis=0)
         concept_norms = np.array(concept_norms)
-        projection = (activations @ concept_matrix.T)/concept_norms
+        projection = (activations @ concept_matrix.T)/(concept_norms**2)
 
         if not self.in_memory:
             # remove from memory

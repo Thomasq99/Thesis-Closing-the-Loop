@@ -520,7 +520,8 @@ class ACE:
          {'bottleneck layer':{'concept name':[list of accuracies], ...}, ...}. Also includes the random concept and the
          target_class as 'concept name'.
         """
-        os.makedirs(self.cav_dir)
+        if not os.path.exists(self.cav_dir):
+            os.makedirs(self.cav_dir)
         accuracy = {bottleneck: {} for bottleneck in self.bottlenecks}
         concepts_to_delete = []
         for bottleneck in self.bottlenecks:
