@@ -36,6 +36,7 @@ class ConceptBank:
             model = tf.keras.models.load_model(self.model_name)
         else:
             raise ValueError(f'{self.model_name} is not a directory to a model nor the InceptionV3model')
+
         return model
 
     def add_concept(self, concepts: List):
@@ -83,6 +84,7 @@ class ConceptBank:
         @param discovery_images: Dictionary containing an array of discovery images for each class.
             format is {concept_class_name: img_array}
         """
+        model = self.load_model()
         if self.tcav_scores is not None:
             concept_names_to_compute = self.concept_names[-(len(self.concept_names) - len(self.tcav_scores)):]
         else:
@@ -99,15 +101,13 @@ class ConceptBank:
                 image_dir = os.path.join(self.working_dir, 'concepts', class_, 'images')
                 discovery_images[class_] = load_images_from_files([os.path.join(image_dir, file) for file in
                                                                     os.listdir(image_dir)], do_shuffle=True,
-                                                                   max_imgs=40)
+                                                                   max_imgs=40, shape=model.input.shape[1:3][::-1])
 
         if not self.in_memory:
             self.load_in_memory()
             self.in_memory = False
 
         concepts_to_compute = [concept for concept in self.concepts if concept.concept in concept_names_to_compute]
-
-        model = self.load_model()
 
         folder_path = os.path.join(self.working_dir, 'cavs_temp')
         cavs_random = [CAV.load_cav(os.path.join(folder_path, filename)) for filename in os.listdir(folder_path)
@@ -326,6 +326,7 @@ class ConceptBank:
 
         if not self.in_memory:
             self.concepts = None
+
         return fig
 
     def plot_concept(self, concept_name, num_images, shape):
@@ -372,5 +373,6 @@ class ConceptBank:
 
         fig.update_xaxes(showgrid=False, showticklabels=False, zeroline=False)
         fig.update_yaxes(showgrid=False, showticklabels=False, zeroline=False)
+
 
         return fig

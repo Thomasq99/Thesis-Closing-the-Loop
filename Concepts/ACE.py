@@ -43,7 +43,7 @@ class ACE:
     def __init__(self, model_name: str, bottlenecks: List, target_class: str, source_dir: str, working_dir: str,
                  random_concept: str, class_to_id: Dict, id_to_folder: Dict, average_image_value: int = 117, num_workers: int = 0,
                  channel_mean: bool = True, max_imgs: int = 40, min_imgs: int = 20, num_random_concepts: int = 20,
-                 num_discovery_imgs=40) -> None:
+                 num_discovery_imgs=40, img_shape=(299,299)) -> None:
         """Runs concept discovery algorithm. For more information see ACE docstring.
 
         @param model_name: Path to the tf.keras.Model or InceptionV3
@@ -535,7 +535,7 @@ class ACE:
                 else:
                     filepaths = [os.path.join(concept_dir, concept, bottleneck, img) for img in
                                  os.listdir(os.path.join(concept_dir, concept, bottleneck))]
-                    concept_imgs = load_images_from_files(filepaths, do_shuffle=False)
+                    concept_imgs = load_images_from_files(filepaths, do_shuffle=False, shape=self.image_shape)
 
                 # get activations w.r.t the bottleneck layer of the concept images
                 concept_acts = get_activations_of_images(concept_imgs, bottleneck_model)

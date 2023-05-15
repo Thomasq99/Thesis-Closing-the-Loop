@@ -179,7 +179,7 @@ def run_ACE(model_name: str, path_to_source: str, path_to_working_dir: str, targ
         # STEP 1: SEGMENTATION OF IMAGES
         if os.path.exists(image_dir):  # if exists, patches are already created
             ace.create_patches_for_data(discovery_images=load_images_from_files(
-                [os.path.join(image_dir, file) for file in os.listdir(image_dir)]))
+                [os.path.join(image_dir, file) for file in os.listdir(image_dir)], shape=ace.image_shape))
         else:
             # create patches
             os.makedirs(image_dir)
@@ -299,7 +299,8 @@ def create_new_concept(list_of_contents: List, filenames: List, session_dir: str
 
     # read images
     else:
-        images = np.stack([read_image(content, filename) for content, filename in zip(list_of_contents, filenames)], axis=0)
+        images = np.stack([read_image(content, filename, shape=model.input.shape[1:3][::-1])
+                           for content, filename in zip(list_of_contents, filenames)], axis=0)
         concept_name = f'{target_class}__userDefined_{filenames[0].split(".")[0]}'
 
         concept_dir = os.path.join(session_dir, 'concepts', concept_name)

@@ -102,7 +102,7 @@ settings_menu = [
 Concept_bank_tab_content = dbc.Container(
     [
         dcc.Store(id='concept_bank'),
-        dcc.Store(id='model_layers'),
+        dcc.Store(id='model_information'),
 
         html.Br(),
 
@@ -408,9 +408,10 @@ def get_vis_phCBM_options(stored_info, data_path):
                State('choose_class', 'value'),
                State('concept_bank', 'data'),
                State('bottleneck_phCBM', 'value'),
-               State('data_path', 'value')],
+               State('data_path', 'value'),
+               State('model_information', 'data')],
               prevent_initial_call=True)
-def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
+def run_phCBM(b1, classes, stored_info, bottleneck, data_path, model_information):
 
     # get class_to_id and id_to_folder dictionaries
     with open(os.path.join(data_path, 'class_index.json')) as file:
@@ -421,6 +422,8 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     for key, value in dct.items():
         id_to_folder[int(key)] = value[0]
         class_to_id[value[1]] = int(key)
+
+    model_input_shape = model_information['model_input_shape']
 
     if 'ALL' in classes:
         classes = list(class_to_id.keys())
@@ -434,7 +437,7 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path):
     for idx, class__ in enumerate(classes):
         filenames = [os.path.join(data_path, id_to_folder[class_to_id[class__]], filename) for filename in
                      os.listdir(os.path.join(data_path, id_to_folder[class_to_id[class__]]))]
-        imgs = load_images_from_files(filenames, max_imgs=1000)
+        imgs = load_images_from_files(filenames, max_imgs=1000, shape=model_input_shape)
         images.append(imgs)
         labels.extend([idx]*imgs.shape[0])
     images_arr = np.concatenate(images, axis=0)
@@ -522,17 +525,18 @@ def save_linear_model(b1, model_str, session_dir):
     return None
 
 
-@app.callback(Output('model_layers', 'data'),
+@app.callback(Output('model_information', 'data'),
               [Input('model_selection', 'valid'),
               State('model_selection', 'value')])
-def store_model_layers(is_model_valid, model_name):
+def store_model_info(is_model_valid, model_name):
     if is_model_valid:
         if model_name == 'InceptionV3':
             model = tf.keras.applications.inception_v3.InceptionV3()
         else:
             model = tf.keras.models.load_model(model_name)
         model_layers = [layer.name for layer in model.layers]
-        return {'model_layers': model_layers}
+        print(type(model.input.shape[1:3][::-1]))
+        return {'model_layers': model_layers, 'model_input_shape': list(model.input.shape[1:3][::-1])}
     else:
         return None
 
@@ -559,9 +563,7 @@ def validate_model_selection(model_name):
         return True, False
     else:
         try:
-            start = time.time()
             tf.keras.models.load_model(model_name)
-            print(time.time() - start)
             return True, False
         except:
             print(f'{model_name} is not a valid model')
@@ -589,11 +591,11 @@ def validate_class(target_classes, data_path, data_path_validity):
 
 @app.callback([Output('bottlenecks', 'valid'), Output('bottlenecks', 'invalid')],
               [Input('bottlenecks', 'value'),
-               Input('model_layers', 'data')])
-def validate_bottlenecks(bottlenecks, stored_model_layers):
-    if (stored_model_layers is not None) and (bottlenecks is not None):
+               Input('model_information', 'data')])
+def validate_bottlenecks(bottlenecks, model_information):
+    if (model_information is not None) and (bottlenecks is not None):
         bottlenecks = [bn.strip() for bn in bottlenecks.split(',')]
-        model_layers = stored_model_layers['model_layers']
+        model_layers = model_information['model_layers']
         bottleneck_valid = set(bottlenecks).issubset(model_layers)
         return bottleneck_valid, not bottleneck_valid
     else:
@@ -676,7 +678,7 @@ def update_weight_vis(class_, classes, bottleneck, stored_info_conceptbank, stor
 
         # regression weight plot
         regression_fig = px.bar(
-            x=concept_bank.concept_names, y=classifier.coef_[class_idx], color= colors,
+            x=concept_bank.concept_names, y=classifier.coef_[class_idx], color=colors,
             labels=dict(x='Feature', y='Linear coefficient'),
             title='<i><b>Regression Weights</b></i>'
         )
