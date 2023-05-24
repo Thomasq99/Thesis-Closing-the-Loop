@@ -463,10 +463,16 @@ def run_phCBM(b1, classes, stored_info, bottleneck, data_path, model_information
     predictions = classifier.predict(X_test_proj)
     test_accuracy = np.mean((y_test == predictions)) * 100.
 
-    y_score_test = classifier.predict_proba(X_test_proj)
-    test_auc = metrics.roc_auc_score(y_test, y_score_test, multi_class='ovr')
-    y_score_train = classifier.predict_proba(X_train_proj)
-    train_auc = metrics.roc_auc_score(y_train, y_score_train, multi_class='ovr')
+    if len(y_test.shape) == 1:
+        y_score_test = classifier.predict_proba(X_test_proj)[:, 1]
+        test_auc = metrics.roc_auc_score(y_test, y_score_test)
+        y_score_train = classifier.predict_proba(X_train_proj)[:,1]
+        train_auc = metrics.roc_auc_score(y_train, y_score_train)
+    else:
+        y_score_test = classifier.predict_proba(X_test_proj)
+        test_auc = metrics.roc_auc_score(y_test, y_score_test, multi_class='ovr')
+        y_score_train = classifier.predict_proba(X_train_proj)
+        train_auc = metrics.roc_auc_score(y_train, y_score_train, multi_class='ovr')
 
     # confusion matrix fig
     confusion_matrix = metrics.confusion_matrix(y_test, predictions)
@@ -535,7 +541,6 @@ def store_model_info(is_model_valid, model_name):
         else:
             model = tf.keras.models.load_model(model_name)
         model_layers = [layer.name for layer in model.layers]
-        print(type(model.input.shape[1:3][::-1]))
         return {'model_layers': model_layers, 'model_input_shape': list(model.input.shape[1:3][::-1])}
     else:
         return None
