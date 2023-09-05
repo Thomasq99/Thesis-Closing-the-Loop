@@ -1,0 +1,96 @@
+ACE RESULTS
+
+BOBSLED
+concept 2, 6, 9, 10, 14, 15, 19: Ice/snow track
+concept 3, 5: White
+concept 7: vibrant shiny metallic texture
+concept 8; Helmet
+concept 13: Darker sloped ice track
+concept 16, rails
+concept 17 metallic texture
+concept 20: wood background
+
+NOISY
+concept 1: dark green
+concept 4: lighter bobsled part
+concept 11: darker bobsled part
+concept 12 window
+concept 18: shinybobsled
+
+HALF_TRACK
+concept 1, 5, 15: grass
+concept 2: light army camo
+concept 3 track
+concept 16, 17: half track wheel
+concept 4, 13, 18: white/light blue sky
+concept 6: people
+concept 7, 20 armor plating
+concept 9: dry grass
+concept 11, 21: trees
+concept 12 dark army green
+Noise: 8, 10, 14, 19, 22
+
+KELPIE:
+concept 1, 5: grass
+concept 2, 8: dark color
+concept 3: asphalt
+concept 6: long grass
+concept 10: green grass
+concept 12: forest-ish background
+concept 13: vertical stripes from forest background
+concept 15, 17: brownish fur
+concept 16, 19: dark/black fur
+concept 18: dog head
+
+Noise 4, 7, 9, 11, 14
+
+PHOTOCOPIER:
+concept 1, 14, 20: monotone wall office background
+concept 2, 3, 4: white-ish plastic
+concept 5, 8: white
+concept 7: brown
+concept 10, 16 white plastic trays
+concept 11: black/dark brown
+concept 12: bulky top of photocopier
+concept 13: separated plastic pieces
+concept 15, 21: buttons on white plastic
+concept 17: dark/shadow
+
+
+noise: concept 6, 9, 18, 19
+noise: 2?
+
+RUNNING_SHOE:
+concept 2: busy pattern with crossing stripes
+concept 3, 12: white shoe with laces/white print-ish 
+concept 4: dark shoe
+concept 5: mesh
+concept 6, 7, 10, 15: light monotone texture
+concept 8: white shoe with white laces
+concept 11: sandy dark texture
+concept 14, 16: dark shadowy wood texture
+concept 13: round reflective surface
+
+
+noise: 1, 9
+
+SLIDE_RULE:
+vertical markings with small numbers
+white background
+
+WHIPPET:
+concept 1: grey-ish fur
+concept 2: brown-ish background
+concept 3: light fur
+concept 4, 5, 6, 7, 8, 9, 13, 14: grass background
+concept 11: slender body/snout
+
+noise: 10
+
+WOK:
+round pan, oily, food, metallic color
+
+ZEBRA:
+horse-like body, black and white stripes, ear shape, nose, dry grass
+
+

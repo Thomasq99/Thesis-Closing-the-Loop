@@ -1,0 +1,26 @@
+BOBSLED
+side rails, ice/snow track, white, vibrant shiny metallic texture, sloped ice track, sponsor
+
+HALF_TRACK
+grass, green army color, armor plating, wheels, track, light army color, people
+
+KELPIE
+grass, asphalt, trees, brown/dark fur, dog head
+
+PHOTOCOPIER
+plastic trays, white plastic color, buttons on white
+
+RUNNING_SHOE
+mesh texture, laces, white, round heel, print with crossing stripes.
+
+SLIDE_RULE
+vertical markings with small numbers, white color
+
+WHIPPET
+grey/brown/light fur, slender body/snout, grass
+
+WOK:
+round pan, oily, food, metallic color
+
+ZEBRA:
+horse-like body, black and white stripes, ear shape, nose, dry grass
